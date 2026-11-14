@@ -1,3 +1,5 @@
+<p align="center"><img src="public/icon-512.png" width="128" alt="Yumeiro"></p>
+
 > **Powered by Yumeiro**  
 > 使用 Cindy、Dash黄一孟 的项目进行制作 · 制作者：BYL  
 > 仅供个人自用，暂不允许商业化使用；转载或二次开发请保留署名。 详见 [`LICENSE`](./LICENSE)、[`NOTICE`](./NOTICE) 与 [`商业化声明.md`](./商业化声明.md)。
