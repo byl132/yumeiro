@@ -1,0 +1,75 @@
+/* 深色主题：靠 html[data-theme=dark] 切换；变量 + 针对写死白底组件的覆盖 */
+html[data-theme=dark]{
+  color-scheme:dark;
+  --ink:#e8e9ee;--muted:#9a9eab;--line:#2c2f3b;--accent-soft:#34202a;--shadow:0 16px 45px #0009;
+  --ym-card:#171a23;--gs-fg:#e8e9ee;--gs-muted:#9a9eab;--gs-grid:#2c2f3b;--gs-bg:#161922;--gs-card:#1a1d27;
+}
+html[data-theme=dark] body,html[data-theme=dark] body.settings-page{background:#0f1117;color:var(--ink)}
+html[data-theme=dark] .login-card,html[data-theme=dark] .modal,html[data-theme=dark] .composer,html[data-theme=dark] .bubble,
+html[data-theme=dark] .suggestion,html[data-theme=dark] .pill,html[data-theme=dark] .icon-button,html[data-theme=dark] .secondary,
+html[data-theme=dark] .team-nav,html[data-theme=dark] .team-main,html[data-theme=dark] .team-modal,html[data-theme=dark] .mk-card,
+html[data-theme=dark] .field input,html[data-theme=dark] .composer-picks select{background:#171a23;color:var(--ink);border-color:var(--line)}
+html[data-theme=dark] .topbar{background:#0f1117cc;border-color:var(--line)}
+html[data-theme=dark] .suggestion:hover,html[data-theme=dark] .team-nav button:hover,html[data-theme=dark] .team-main .secondary:hover{background:#212531;border-color:#3a3f50}
+html[data-theme=dark] .message.user .bubble{background:#3b3f55;border-color:#3b3f55;color:#fff}
+html[data-theme=dark] .message.user .mavatar{background:#3a2229;color:#ffb3bd}
+html[data-theme=dark] .bubble.error{background:#2c1a1e;border-color:#5a2a33;color:#ffb3bd}
+html[data-theme=dark] .composer textarea,html[data-theme=dark] .team-main input,html[data-theme=dark] .team-main textarea,html[data-theme=dark] .team-main select,
+html[data-theme=dark] .mk-search{background:#12141b;color:var(--ink);border-color:var(--line)}
+html[data-theme=dark] .team-main code{background:#232736;color:#e8e9ee}
+html[data-theme=dark] .team-row{background:transparent;border-color:var(--line)}
+html[data-theme=dark] .team-main .team-row:hover,html[data-theme=dark] .mk-card:hover{border-color:#3a3f50;box-shadow:0 2px 14px #0007}
+html[data-theme=dark] .team-note,html[data-theme=dark] .team-nav h4,html[data-theme=dark] .note,html[data-theme=dark] .footnote{color:var(--muted)}
+html[data-theme=dark] .team-pagehead a{color:#c9ccd6}
+html[data-theme=dark] .mk-badge{background:#252938;color:#c0c4d0}
+html[data-theme=dark] .mk-desc,html[data-theme=dark] .mk-tags span{color:#b4b8c5}
+html[data-theme=dark] .mk-seg button.on{background:#262a38;color:#ff8896}
+html[data-theme=dark] .team-err,html[data-theme=dark] .login-error{color:#ff8a98}
+html[data-theme=dark] .team-pagehead{background:#171a23;border-color:var(--line);box-shadow:none}
+html[data-theme=dark] .team-pagehead h2{color:var(--ink)}
+html[data-theme=dark] .team-nav button{color:#d4d6df}
+html[data-theme=dark] .team-nav button.on{background:#34202a;color:#ff8a98}
+html[data-theme=dark] hr{border-color:var(--line)}
+html[data-theme=dark] table th,html[data-theme=dark] table td{border-color:var(--line)!important}
+html[data-theme=dark] img.avatar-img,html[data-theme=dark] video{filter:none}
+
+/* 仪表盘（浅色默认值 + 深色覆盖） */
+.gs-dash{--gs-card:#ffffff;display:block}
+.gs-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0 14px}
+.gs-bar select,.gs-bar input{height:34px;padding:0 10px;border:1px solid var(--line);border-radius:9px;background:var(--gs-card,#fff);color:var(--ink);width:auto;min-width:0}
+.gs-bar .secondary{height:34px}
+html[data-theme=dark] .gs-bar select,html[data-theme=dark] .gs-bar input{background:#12141b}
+.gs-dash .gs-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px}
+.gs-dash .gs-kpi{border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:var(--gs-card)}
+.gs-dash .gs-kpi b{display:block;font-size:22px;line-height:1.2}
+.gs-dash .gs-kpi span{font-size:12px;color:var(--muted)}
+.gs-dash .gs-kpi.bad b{color:#c0392b}
+.gs-dash .gs-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:12px}
+.gs-dash .gs-card{border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:var(--gs-card);min-width:0}
+.gs-dash .gs-card.wide{grid-column:1/-1}
+.gs-dash .gs-card h4{margin:0 0 8px;font-size:13px;display:flex;align-items:center;gap:8px}
+.gs-dash .gs-card h4 .grow{flex:1}
+.gs-dash .gs-mini{border:1px solid var(--line);background:transparent;color:var(--muted);border-radius:7px;font-size:11px;padding:2px 8px;cursor:pointer}
+.gs-dash .gs-mini:hover{color:var(--ink);border-color:var(--muted)}
+html[data-theme=dark] .gs-dash{--gs-card:#1a1d27}
+html[data-theme=dark] .gs-dash .gs-kpi.bad b{color:#ff8a98}
+@media print{.gs-dash .gs-bar,.gs-dash .gs-mini,.sidebar,.topbar,.team-nav{display:none!important}.gs-dash{--gs-card:#fff}body{background:#fff!important;color:#000!important}}
+
+/* 深色模式下的设置页：不再是一整块不透明的“黑板”盖住壁纸，改成和聊天界面一致的半透明玻璃 */
+html[data-theme=dark] body.settings-page .team-page .team-modal{background:none;border:0;box-shadow:none}
+html[data-theme=dark] body.settings-page .team-pagehead,
+html[data-theme=dark] body.settings-page .team-nav,
+html[data-theme=dark] body.settings-page .team-main{background:rgba(16,18,27,.62);border:1px solid rgba(255,255,255,.1);box-shadow:0 8px 30px rgba(0,0,0,.28);-webkit-backdrop-filter:blur(22px) saturate(1.25);backdrop-filter:blur(22px) saturate(1.25)}
+html[data-theme=dark] body.settings-page .team-main .team-row,
+html[data-theme=dark] body.settings-page .mk-card{background:rgba(255,255,255,.05);border-color:rgba(255,255,255,.1)}
+html[data-theme=dark] body.settings-page .team-main .team-row:hover,
+html[data-theme=dark] body.settings-page .mk-card:hover{background:rgba(255,255,255,.09)}
+html[data-theme=dark] body.settings-page .team-main input,
+html[data-theme=dark] body.settings-page .team-main select,
+html[data-theme=dark] body.settings-page .team-main textarea,
+html[data-theme=dark] body.settings-page .team-main .secondary{background:rgba(8,9,14,.5);border-color:rgba(255,255,255,.14)}
+html[data-theme=dark] body.settings-page .team-nav button:hover{background:rgba(255,255,255,.08)}
+html[data-theme=dark] body.settings-page .team-nav button.on{background:rgba(233,81,100,.2)}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  html[data-theme=dark] body.settings-page .team-pagehead,html[data-theme=dark] body.settings-page .team-nav,html[data-theme=dark] body.settings-page .team-main{background:rgba(16,18,27,.94)}
+}

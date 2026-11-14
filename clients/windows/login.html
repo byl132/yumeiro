@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>Yumeiro 登录</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src file: data:">
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:radial-gradient(1200px 600px at 20% 0%,#2a2350 0%,#12131a 55%);color:#e8e9ee;font:15px/1.6 system-ui,"Microsoft YaHei",sans-serif}
+.card{width:min(420px,92vw);padding:30px 30px 24px;border-radius:20px;background:#1b1d27ee;border:1px solid #2c2f3d;box-shadow:0 20px 70px #000a}
+.logo{display:flex;align-items:center;gap:12px;margin-bottom:6px}.logo img{width:46px;height:46px;border-radius:14px}.logo b{font-size:22px}.logo span{display:block;color:#9a9db0;font-size:12px}
+label{display:block;margin:14px 0 4px;font-size:13px;color:#b9bccd}
+input[type=text],input[type=password],input[type=email]{width:100%;padding:11px 13px;border-radius:11px;border:1px solid #343848;background:#12131a;color:inherit;font:inherit;outline:none}
+input:focus{border-color:#7955c7;box-shadow:0 0 0 3px #7955c733}
+.row{display:flex;gap:8px}.row>*{flex:1}
+.chk{display:flex;align-items:flex-start;gap:8px;margin:14px 0 2px;font-size:12.5px;color:#9a9db0}.chk input{margin-top:3px}
+button{width:100%;margin-top:18px;padding:12px;border:0;border-radius:12px;background:#7955c7;color:#fff;font:inherit;font-weight:600;cursor:pointer}
+button:disabled{opacity:.6;cursor:wait}
+.err{min-height:22px;margin-top:12px;color:#ff8a8a;font-size:13px;word-break:break-all}.ok{color:#8be0a6}
+.foot{margin-top:10px;color:#6f7388;font-size:12px;text-align:center}
+</style></head>
+<body><form class="card" id="f" autocomplete="on">
+<div class="logo"><img src="build/icon.png" alt=""><div><b>Yumeiro 梦色</b><span>连接到你自己部署的服务器</span></div></div>
+<label for="server">服务器地址（IP 或域名，端口可选）</label>
+<input id="server" type="text" placeholder="例如 192.168.1.8:8787 或 chat.example.com" autofocus spellcheck="false">
+<label for="email">账号（邮箱）</label>
+<input id="email" type="email" placeholder="you@example.com" autocomplete="username">
+<label for="password">密码</label>
+<input id="password" type="password" placeholder="密码" autocomplete="current-password">
+<label class="chk" for="ign"><input id="ign" type="checkbox"><span>我的服务器用自签名证书（忽略证书错误，不安全）。只对这个服务器生效；能的话建议配正式证书。</span></label>
+<button id="go" type="submit">登录</button>
+<div class="err" id="err"></div>
+<div class="foot">地址不写 http:// 或 https:// 也行，会自动识别</div>
+</form>
+<script>
+const $ = id => document.getElementById(id);
+(async () => {
+  const d = await window.yumeiroApp.loginDefaults();
+  $('server').value = d.server || ''; $('email').value = d.email || ''; $('ign').checked = Boolean(d.ignoreCert);
+  (d.server && d.email ? $('password') : d.server ? $('email') : $('server')).focus();
+})();
+$('f').addEventListener('submit', async e => {
+  e.preventDefault();
+  const err = $('err'), go = $('go'); err.className = 'err'; err.textContent = '';
+  if (!$('server').value.trim()) { err.textContent = '请填写服务器地址'; return; }
+  if (!$('email').value.trim() || !$('password').value) { err.textContent = '请填写账号和密码'; return; }
+  go.disabled = true; go.textContent = '正在连接…';
+  try {
+    const r = await window.yumeiroApp.login({ server: $('server').value, email: $('email').value, password: $('password').value, ignoreCert: $('ign').checked });
+    if (!r.ok) { err.textContent = r.error || '登录失败'; if (r.needIgnore) $('ign').focus(); }
+    else { err.className = 'err ok'; err.textContent = r.note || '登录成功，正在进入…'; }
+  } catch (x) { err.textContent = '出错了：' + (x && x.message || x); }
+  go.disabled = false; go.textContent = '登录';
+});
+</script></body></html>

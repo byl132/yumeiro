@@ -1,0 +1,13 @@
+node_modules
+data
+.env
+secrets
+test
+.git
+*.bak
+public/downloads
+clients
+brand
+*.zip
+*.exe
+*.apk
