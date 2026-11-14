@@ -1,11 +1,10 @@
 {
   "name": "yumeiro-web",
-  "version": "0.43.0",
+  "version": "0.43.1",
   "private": true,
   "license": "SEE LICENSE IN LICENSE",
-  "author": "Cindy + 心动 + Dash黄一孟",
   "type": "module",
-  "description": "Yumeiro 私有工作空间（自托管网页服务端）",
+  "description": "Yumeiro 私有工作空间（自托管网页服务端）；使用 Cindy、Dash黄一孟 的项目进行制作（制作者：BYL），仅供个人自用，暂不允许商业化使用",
   "engines": {
     "node": ">=22"
   },

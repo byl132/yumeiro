@@ -674,7 +674,7 @@
       } catch (x) { col.append(h('div', 'set-card', h('div', 'empty-state', '读取用量失败：' + x.message))); }
     } else if (section === 'about') {
       const version = await app.version().catch(() => '');
-      col.append(h('div', 'set-h', '关于'), h('div', 'set-card', h('dl', 'kv', h('dt', '', '客户端版本'), h('dd', '', version || '—'), h('dt', '', '服务器'), h('dd', '', host), h('dt', '', '登录账号'), h('dd', '', me?.email || ''), h('dt', '', '可用模型'), h('dd', '', String(models.length)), h('dt', '', '智能体'), h('dd', '', String(agents.length)), h('dt', '', '工作区'), h('dd', '', String(workspaces.length)))), h('div', 'empty-state', 'Yumeiro 由 Cindy + 心动 + Dash黄一孟 共同创作。欢迎使用、修改和分发（含商用），但必须保留这行署名和 LICENSE。'));
+      col.append(h('div', 'set-h', '关于'), h('div', 'set-card', h('dl', 'kv', h('dt', '', '客户端版本'), h('dd', '', version || '—'), h('dt', '', '服务器'), h('dd', '', host), h('dt', '', '登录账号'), h('dd', '', me?.email || ''), h('dt', '', '可用模型'), h('dd', '', String(models.length)), h('dt', '', '智能体'), h('dd', '', String(agents.length)), h('dt', '', '工作区'), h('dd', '', String(workspaces.length)))), h('div', 'empty-state', h('div', '', 'Powered by Yumeiro'), h('div', '', '使用 Cindy、Dash黄一孟 的项目进行制作 · 制作者：BYL'), h('div', '', '仅供个人自用，暂不允许商业化使用；转载或二次开发请保留署名')));
     }
   }
 

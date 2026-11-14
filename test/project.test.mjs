@@ -403,12 +403,14 @@ test('网页找回密码的手机确认：安卓和苹果客户端都有验证�
   assert.match(ui, /fun SecurityScreen/); assert.match(swiftUi, /struct SecurityView/);
 });
 
-test('署名：LICENSE / NOTICE / 登录页 / 各客户端“关于”页都带 Cindy + 心动 + Dash黄一孟', async () => {
+test('署名：LICENSE / NOTICE / 登录页 / 各客户端“关于”页都有“Powered by Yumeiro”、“使用 Cindy、Dash黄一孟 的项目进行制作 · 制作者：BYL”和不允许商用的说明', async () => {
   const { readFileSync } = await import('node:fs');
-  const AUTH = 'Cindy + 心动 + Dash黄一孟';
-  for (const f of ['LICENSE', 'NOTICE', 'README.md', '商业化声明.md', 'public/index.html', 'clients/windows/app.js',
+  for (const f of ['LICENSE', 'NOTICE', 'README.md', 'public/index.html', 'clients/windows/app.js',
     'clients/android-native/app/src/main/java/org/yumeiro/app/ui/SettingsScreen.kt', 'clients/apple/Sources/Shared/SettingsViews.swift']) {
-    assert.ok(readFileSync(path.join(root, f), 'utf8').includes(AUTH), f + ' 缺少署名');
+    const s = readFileSync(path.join(root, f), 'utf8');
+    assert.ok(s.includes('Powered by Yumeiro'), f + ' 缺少第一行');
+    assert.ok(s.includes('使用 Cindy、Dash黄一孟 的项目进行制作 · 制作者：BYL'), f + ' 缺少第二行');
+    assert.match(s, /暂不允许商业化使用/, f + ' 缺少第三行');
   }
-  assert.doesNotMatch(readFileSync(path.join(root, 'LICENSE'), 'utf8'), /保留所有权利|All rights reserved/);
+  assert.doesNotMatch(readFileSync(path.join(root, 'LICENSE'), 'utf8'), /含商用|including for commercial/);
 });

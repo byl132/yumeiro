@@ -119,8 +119,10 @@ fun SettingsScreen(vm: AppViewModel) {
                 PickRow("字体大小", fonts.firstOrNull { it.id == vm.fontScale.toString() }?.label ?: "标准") { picker = "font" }
             }
             Card("关于") {
-                Text("Yumeiro 安卓原生客户端 1.3.0", color = Muted, fontSize = 13.sp)
-                Text("Yumeiro 由 Cindy + 心动 + Dash黄一孟 共同创作。欢迎使用、修改和分发（含商用），但必须保留这行署名和 LICENSE。", color = Muted, fontSize = 11.sp)
+                Text("Yumeiro 安卓原生客户端 1.3.1", color = Muted, fontSize = 13.sp)
+                Text("Powered by Yumeiro", color = Ink, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text("使用 Cindy、Dash黄一孟 的项目进行制作 · 制作者：BYL", color = Muted, fontSize = 11.sp)
+                Text("仅供个人自用，暂不允许商业化使用；转载或二次开发请保留署名", color = Muted, fontSize = 11.sp)
                 Text("管理后台（成员、模型、MCP、市场等）请在浏览器里打开 服务器地址/admin。", color = Muted, fontSize = 12.sp)
             }
             OutlinedButton(onClick = { vm.logout() }, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(14.dp)) { Icon(Icons.Default.ExitToApp, null); Spacer(Modifier.size(8.dp)); Text("退出登录 / 切换账号", color = MaterialTheme.colorScheme.error) }

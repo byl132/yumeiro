@@ -1,4 +1,6 @@
-> **Yumeiro 由 Cindy + 心动 + Dash黄一孟 共同创作。欢迎使用、修改和分发（含商用），但必须保留这行署名和 LICENSE。** 详见 [`LICENSE`](./LICENSE)、[`NOTICE`](./NOTICE) 与 [`商业化声明.md`](./商业化声明.md)。
+> **Powered by Yumeiro**  
+> 使用 Cindy、Dash黄一孟 的项目进行制作 · 制作者：BYL  
+> 仅供个人自用，暂不允许商业化使用；转载或二次开发请保留署名。 详见 [`LICENSE`](./LICENSE)、[`NOTICE`](./NOTICE) 与 [`商业化声明.md`](./商业化声明.md)。
 
 # Yumeiro 私有工作空间（自托管网页 + API）
 
@@ -413,6 +415,9 @@ ANTHROPIC_API_KEY=sk-... OPENAI_API_KEY=sk-... PI_PROVIDER=anthropic PI_API_KEY=
 - Cindy 程序守护循环（退出 10 秒后自动重启），每次启动前清除过期的 `discovery.json` / `host.lock`（修复 HOST_IN_USE）；桥接连不上时重新读取发现文件。
 - 新增 `scripts/desktop-check.sh` 一键自检。
 
+
+## 0.43.1
+- **署名与使用说明**：项目使用 Cindy、Dash黄一孟 的项目进行制作（制作者 BYL），许可改为“仅供个人自用，暂不允许商业化使用，转载或二次开发需保留署名”（见 LICENSE / NOTICE / 商业化声明.md）；网页登录页、Windows / 安卓 / 苹果客户端的“关于”页都带有三行署名说明（Powered by Yumeiro / 使用 Cindy、Dash黄一孟 的项目进行制作 · 制作者：BYL / 仅供个人自用…）。安卓 1.3.1，Windows 0.12.3。
 
 ## 0.43.0
 - 安卓原生版升到 1.3.0；Windows 客户端不变（仍是 0.12.2，客户端文件夹里的 exe 没重新构建）。

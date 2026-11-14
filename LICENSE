@@ -1,42 +1,32 @@
-Yumeiro 署名许可证 / Yumeiro Attribution License
+Yumeiro 个人使用许可 / Yumeiro Personal-Use License
 
-Copyright (c) 2026 Cindy + 心动 + Dash黄一孟
+Powered by Yumeiro
+使用 Cindy、Dash黄一孟 的项目进行制作 · 制作者：BYL
+Made with the projects of Cindy and Dash黄一孟 · Maker: BYL
 
-任何人都可以免费获得本软件及相关文档（“本软件”）的副本，并不受限制地使用、复制、修改、合并、
-发布、分发、再许可和销售本软件（包括商业用途），但必须满足下面的署名条件：
+本软件及相关文档（“本软件”）可以免费供个人自用（学习、研究、自己部署自己用），但：
 
-署名条件（必须全部满足）：
-  1. 在本软件的所有副本和衍生作品的源码、文档或发行说明中，保留上面的版权行
-     “Copyright (c) 2026 Cindy + 心动 + Dash黄一孟” 和本许可证全文。
-  2. 以任何形式对外提供本软件或其衍生作品（包括网页、客户端、App、部署给他人使用的服务）时，
-     必须在用户能看到的位置（例如“关于”页、登录页页脚或说明文档）显著标注：
-         Powered by / 基于 Yumeiro —— 作者：Cindy + 心动 + Dash黄一孟
-  3. 不得移除、隐藏或替换上述署名，也不得声称自己是本软件的原作者。
-  4. 衍生作品可以加上自己的名字，但只能是“追加”，不能取代原署名。
+  1. 不得商业化使用：暂不允许收费提供服务、转售、SaaS、广告变现、公司/组织的商业用途或以盈利为目的的任何使用。
+     需要商用，请先取得所有相关方的书面同意。
+  2. 保留署名：使用、转载、二次开发或分发时，必须保留这份许可、NOTICE，以及界面里的三行说明
+     （“Powered by Yumeiro / 使用 Cindy、Dash黄一孟 的项目进行制作 · 制作者：BYL / 仅供个人自用，暂不允许商业化使用；
+     转载或二次开发请保留署名”），不得删除、隐藏或冒充原作者。
+  3. 不得把本软件当作自己的原创作品对外发布，也不得声称与上述作者存在未经确认的合作或背书。
+  4. 本软件中包含或调用的第三方内容（如 Cindy 桌面端、技能市场里的技能、MCP 服务、各模型服务商接口），
+     分别遵循它们自己的许可和服务条款；使用者需自行遵守。
 
-本软件按“现状”提供，不附带任何明示或暗示的担保，包括但不限于适销性、特定用途适用性和不侵权。
-在任何情况下，作者或版权持有人均不对因本软件或其使用而产生的任何索赔、损害或其他责任负责。
+本软件按“现状”提供，不附带任何明示或暗示的担保；因使用或无法使用本软件造成的任何损失，
+提供者不承担责任。
+
+以上条款的目的：让大家可以放心自用，同时尊重原作者的劳动，避免在没有授权的情况下被商业化。
 
 ----------------------------------------------------------------------
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of this
-software and associated documentation files (the "Software"), to deal in the Software
-without restriction, including without limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of the Software (including for
-commercial purposes), subject to the following conditions:
-
-1. The copyright line "Copyright (c) 2026 Cindy + 心动 + Dash黄一孟" and this license text shall be
-   included in all copies or substantial portions of the Software and derivative works.
-2. Any distribution or service that makes the Software or a derivative work available to
-   others must display, in a place visible to users (e.g. an About page, a login-page
-   footer, or the documentation), the attribution:
-       Powered by Yumeiro — by Cindy + 心动 + Dash黄一孟
-3. The attribution must not be removed, hidden, or replaced, and you must not claim to be
-   the original author. You may add your own name in addition, never instead.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
-INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
-PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE
-FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
-OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
+This software and its documentation (the "Software") may be used free of charge for personal,
+non-commercial purposes (learning, research, self-hosting for yourself). You may NOT use it
+commercially (selling, paid services, SaaS, ad monetization, use inside a company for profit)
+without the prior written consent of all relevant parties. When using, republishing, modifying
+or redistributing it you must keep this license, the NOTICE file and the in-app credit lines
+("Powered by Yumeiro", "Made with the projects of Cindy and Dash黄一孟 · Maker: BYL"), and you must not present
+the Software as your own original work. Third-party components keep their own licenses and terms.
+The Software is provided "AS IS", without warranty of any kind.
