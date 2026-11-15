@@ -7,7 +7,7 @@
 
 | | |
 |---|---|
-| 📦 主仓库 | [yumeiro](https://github.com/OWNER/yumeiro)（服务器 + 全部客户端） |
+| 📦 主仓库 | [yumeiro](https://github.com/yumeiro/yumeiro)（服务器 + 全部客户端） |
 | 🚀 快速开始 | 解压后运行 `./install.sh`，详见主仓库 README |
 | 📄 许可 | Apache License 2.0 |
 
