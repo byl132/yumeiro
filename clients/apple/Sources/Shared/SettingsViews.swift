@@ -167,7 +167,7 @@ struct SettingsView: View {
                 Text("Yumeiro 苹果原生客户端 1.0.0").font(.footnote).foregroundStyle(.secondary)
                 Text("Powered by Yumeiro").font(.caption.bold())
                 Text("使用 Cindy、Dash黄一孟 的项目进行制作 · 制作者：BYL").font(.caption2).foregroundStyle(.secondary)
-                Text("仅供个人自用，暂不允许商业化使用；转载或二次开发请保留署名").font(.caption2).foregroundStyle(.secondary)
+                Text("以 Apache License 2.0 开源；使用、修改、分发请保留署名与许可证").font(.caption2).foregroundStyle(.secondary)
                 Text("管理后台（模型服务商、MCP 添加编辑等）请在浏览器里打开 服务器地址/admin。").font(.caption).foregroundStyle(.secondary)
             }
             Section { Button("退出登录 / 切换账号", role: .destructive) { Task { await model.logout() } } }

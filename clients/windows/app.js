@@ -579,7 +579,7 @@
     catch { /* 取不到就不显示 */ }
   }
 
-  // ── 设置页（参照 Cindy：左侧导航 + 右侧卡片）──
+  // ── 设置页（左侧导航 + 右侧卡片）──
   let lastSettingsSection = 'general';
   const ICONS = {
     general: '<svg viewBox="0 0 16 16"><path d="M2.5 5h6M11.5 5h2M2.5 11h2M7.5 11h6"/><circle cx="10" cy="5" r="1.5"/><circle cx="6" cy="11" r="1.5"/></svg>',
@@ -674,7 +674,7 @@
       } catch (x) { col.append(h('div', 'set-card', h('div', 'empty-state', '读取用量失败：' + x.message))); }
     } else if (section === 'about') {
       const version = await app.version().catch(() => '');
-      col.append(h('div', 'set-h', '关于'), h('div', 'set-card', h('dl', 'kv', h('dt', '', '客户端版本'), h('dd', '', version || '—'), h('dt', '', '服务器'), h('dd', '', host), h('dt', '', '登录账号'), h('dd', '', me?.email || ''), h('dt', '', '可用模型'), h('dd', '', String(models.length)), h('dt', '', '智能体'), h('dd', '', String(agents.length)), h('dt', '', '工作区'), h('dd', '', String(workspaces.length)))), h('div', 'empty-state', h('div', '', 'Powered by Yumeiro'), h('div', '', '使用 Cindy、Dash黄一孟 的项目进行制作 · 制作者：BYL'), h('div', '', '仅供个人自用，暂不允许商业化使用；转载或二次开发请保留署名')));
+      col.append(h('div', 'set-h', '关于'), h('div', 'set-card', h('dl', 'kv', h('dt', '', '客户端版本'), h('dd', '', version || '—'), h('dt', '', '服务器'), h('dd', '', host), h('dt', '', '登录账号'), h('dd', '', me?.email || ''), h('dt', '', '可用模型'), h('dd', '', String(models.length)), h('dt', '', '智能体'), h('dd', '', String(agents.length)), h('dt', '', '工作区'), h('dd', '', String(workspaces.length)))), h('div', 'empty-state', h('div', '', 'Powered by Yumeiro'), h('div', '', '使用 Cindy、Dash黄一孟 的项目进行制作 · 制作者：BYL'), h('div', '', '以 Apache License 2.0 开源；使用、修改、分发请保留署名与许可证')));
     }
   }
 

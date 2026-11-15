@@ -18,6 +18,6 @@ Kotlin + Jetpack Compose 写的真原生界面（不是网页外壳）：
 构建：运行 `build-apk.bat`（或 `gradlew.bat assembleDebug`），产物在 `app/build/outputs/apk/debug/app-debug.apk`。
 旧的网页外壳版仍在 `../android`（Capacitor），不再作为发布的 APK。
 
-说明：Powered by Yumeiro。使用 Cindy、Dash黄一孟 的项目进行制作，制作者 BYL；仅供个人自用，暂不允许商业化使用（见仓库根目录 LICENSE）。
+说明：Powered by Yumeiro。使用 Cindy、Dash黄一孟 的项目进行制作，制作者 BYL；以 Apache License 2.0 开源（见仓库根目录 LICENSE）。
 
 已在 Android 模拟器上验证：登录、HTTP 回退、流式聊天、Markdown 渲染。1.1.0/1.2.0 新增的设置、智能体、技能、市场、管理、主题壁纸只验证了能编译，并在模拟器里看过真实服务器上的设置页，其余没点过。未验证：真机、各厂商 ROM、附件上传（含进度）、HTTPS 自签名。

@@ -82,7 +82,7 @@ test.before(async () => {
   base = 'http://127.0.0.1:' + port;
   app = spawn(process.execPath, ['server.mjs'], {
     cwd: root,
-    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', DATA_DIR: dir, COOKIE_SECURE: 'false', STORE_ENCRYPTION_KEY_FILE: keyFile, MODEL_API_KEY_FILE: modelKeyFile, CINDY_AUTH_URL_CN: `http://127.0.0.1:${authPort}`, CINDY_MODEL_ACCESS_URL_CN: `http://127.0.0.1:${authPort}`, MODEL_BASE_URL: `http://127.0.0.1:${mockPort}/v1`, MODEL_NAME: 'test-model', ADMIN_EMAIL: ADMIN.email, ADMIN_PASSWORD: ADMIN.password },
+    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', DATA_DIR: dir, COOKIE_SECURE: 'false', CINDY_SHARING_MIN_SECONDS: '1', STORE_ENCRYPTION_KEY_FILE: keyFile, MODEL_API_KEY_FILE: modelKeyFile, CINDY_AUTH_URL_CN: `http://127.0.0.1:${authPort}`, CINDY_MODEL_ACCESS_URL_CN: `http://127.0.0.1:${authPort}`, MODEL_BASE_URL: `http://127.0.0.1:${mockPort}/v1`, MODEL_NAME: 'test-model', ADMIN_EMAIL: ADMIN.email, ADMIN_PASSWORD: ADMIN.password },
     stdio: ['ignore', 'pipe', 'inherit']
   });
   await new Promise((resolve, reject) => {
@@ -470,6 +470,15 @@ test('Cindy 托管模型：同步目录、仅所属用户可用、走网关密�
   // 主账号共享后：成员能看到并使用（用的是该账号的网关密钥，成员自己的额度照常统计）；取消共享后立即消失
   ({ cookie, csrf } = owner);
   assert.equal((await call('/api/cindy/accounts/' + account.id, { method: 'PATCH', body: { shared: 'yes' } })).status, 400);
+  // 团队共享默认关闭：必须先开始阅读、等满时间、明确确认后才能打开
+  assert.equal((await call('/api/cindy/accounts/' + account.id, { method: 'PATCH', body: { shared: true } })).status, 403, '默认不允许共享');
+  assert.equal((await call('/api/cindy/sharing')).data.allowed, false);
+  assert.equal((await call('/api/cindy/sharing/accept', { method: 'POST', body: { accepted: true } })).status, 400, '没开始阅读不能确认');
+  assert.equal((await call('/api/cindy/sharing/start', { method: 'POST', body: {} })).status, 200);
+  assert.equal((await call('/api/cindy/sharing/accept', { method: 'POST', body: { accepted: true } })).status, 400, '阅读时间不足不能确认');
+  await new Promise(r => setTimeout(r, 1300));
+  assert.equal((await call('/api/cindy/sharing/accept', { method: 'POST', body: { accepted: false } })).status, 400, '必须明确确认');
+  assert.equal((await call('/api/cindy/sharing/accept', { method: 'POST', body: { accepted: true } })).data.allowed, true);
   assert.equal((await call('/api/cindy/accounts/' + account.id, { method: 'PATCH', body: { shared: true } })).data.account.shared, true);
   ({ cookie, csrf } = otherAuth);
   const shared = (await call('/api/models')).data.models.filter(m => m.provider.startsWith('cindy-'));

@@ -155,11 +155,13 @@ test('scripts/fetch-wallpapers.mjs：下载到 DATA_DIR/wallpapers，已存在�
   const rawPort = await listen(raw);
   const out = await mkdtemp(path.join(tmpdir(), 'wall-fetch-'));
   const run = () => new Promise(resolve => {
-    const child = spawn(process.execPath, ['scripts/fetch-wallpapers.mjs'], { cwd: root, env: { ...process.env, DATA_DIR: out, GITHUB_RAW_BASE: `http://127.0.0.1:${rawPort}/makecindy/cindy/main` } });
+    const child = spawn(process.execPath, ['scripts/fetch-wallpapers.mjs', '--accept-terms'], { cwd: root, env: { ...process.env, DATA_DIR: out, GITHUB_RAW_BASE: `http://127.0.0.1:${rawPort}/makecindy/cindy/main` } });
     let text = ''; child.stdout.on('data', c => { text += c; }); child.stderr.on('data', c => { text += c; });
     child.on('exit', code => resolve({ code, text }));
   });
   try {
+    const refused = await new Promise(resolve => { const c = spawn(process.execPath, ['scripts/fetch-wallpapers.mjs'], { cwd: root, env: { ...process.env, DATA_DIR: out, FETCH_WALLPAPERS_ACCEPT: '' } }); c.on('exit', code => resolve(code)); });
+    assert.equal(refused, 2, '没有 --accept-terms 时不应下载');
     const first = await run();
     assert.equal(first.code, 0, first.text);
     assert.deepEqual((await readdir(path.join(out, 'wallpapers'))).sort(), ['cindy-neon.webp', 'dune-dawn.webp']);

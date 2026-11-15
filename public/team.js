@@ -446,6 +446,7 @@
   // 绑定 Cindy 账号：先登录本站账号，再在这里验证并绑定；一个本站账号可绑定多个 Cindy 账号
   async function renderCindy(body) {
     const { accounts } = await api('/api/cindy/accounts');
+    const sharing = me.role === 'admin' ? await api('/api/cindy/sharing').catch(() => null) : null;
     const regionName = r => r === 'cn' ? '国服' : '国际服';
     const holder = el('div', {}), report = el('pre', { style: 'white-space:pre-wrap;font-size:12px;margin:6px 0' });
     // 余额、额度池、订阅（只读，来自官方 model-access 服务）
@@ -463,11 +464,45 @@
     const showBilling = a => loadBalance(cards.get(a.id), a.id, true);
     const subscribeUrl = a => (a.region === 'cn' ? 'https://cindy.com.cn' : 'https://cindy.app') + '/#pricing';
     const act = async (a, kind) => { report.textContent = kind === 'sync' ? '正在同步…' : '正在测试（会向官方网关发一次 1 token 的请求）…'; try { const r = await api(`/api/cindy/accounts/${a.id}/${kind}`, { method: 'POST', body: JSON.stringify({}) }); report.textContent = kind === 'sync' ? (r.ok ? `同步成功：${r.models} 个对话模型` : '同步失败：' + (r.syncError || '未知原因')) : r.steps.map(x => (x.ok ? '✓ ' : '✗ ') + x.name + '：' + x.detail).join('\n'); loadModels(); } catch (e) { report.textContent = e.message; } };
+    const sharePanel = () => {
+      if (!sharing) return null;
+      const box = el('div', { class: 'team-form', style: 'border:1px solid var(--line,#8884);border-radius:10px;padding:12px;margin:8px 0' });
+      const msg = el('div', { class: 'team-err' });
+      if (sharing.allowed) {
+        box.append(el('strong', { textContent: '团队共享 Cindy 账号：已开启' }), el('p', { class: 'team-note', textContent: sharing.byEnv ? '由服务器环境变量 CINDY_ALLOW_SHARED_ACCOUNTS=1 开启。' : `已由 ${sharing.ack?.email || '主账号'} 于 ${sharing.ack?.at ? fmt(sharing.ack.at) : ''} 确认：已阅读 Cindy 用户协议并自行承担后果。` }));
+        if (!sharing.byEnv) box.append(el('button', { type: 'button', class: 'secondary', textContent: '关闭团队共享', on: { click: async () => { try { await api('/api/cindy/sharing/revoke', { method: 'POST', body: JSON.stringify({}) }); render(); loadModels(); } catch (e) { msg.textContent = e.message; } } } }), msg);
+        return box;
+      }
+      const secs = sharing.minSeconds || 120;
+      const check = el('input', { type: 'checkbox', disabled: true }), go = el('button', { type: 'button', textContent: '开启团队共享', disabled: true });
+      const status = el('div', { class: 'team-note', textContent: '' });
+      let started = false, left = secs, timer = null;
+      const sync = () => { check.disabled = !(started && left <= 0); if (check.disabled) check.checked = false; go.disabled = check.disabled || !check.checked; };
+      check.addEventListener('change', sync);
+      const link = (href, text) => el('a', { href, target: '_blank', rel: 'noopener noreferrer', textContent: text, style: 'margin-right:12px', on: { click: () => start() } });
+      async function start() {
+        if (started) return; started = true;
+        try { const r = await api('/api/cindy/sharing/start', { method: 'POST', body: JSON.stringify({}) }); left = r.minSeconds ?? secs; } catch (e) { started = false; msg.textContent = e.message; return; }
+        const tick = () => { status.textContent = left > 0 ? `请认真阅读 Cindy 用户协议，还需等待 ${left} 秒后才能确认。` : '已满足阅读时间，可以勾选确认。'; sync(); if (left <= 0) { clearInterval(timer); return; } left -= 1; };
+        tick(); timer = setInterval(tick, 1000);
+      }
+      go.addEventListener('click', async () => { try { await api('/api/cindy/sharing/accept', { method: 'POST', body: JSON.stringify({ accepted: true }) }); render(); loadModels(); } catch (e) { msg.textContent = e.message; } });
+      box.append(
+        el('strong', { textContent: '团队共享 Cindy 账号：未开启（默认关闭）' }),
+        el('p', { class: 'team-note', textContent: '把一个 Cindy 账号共享给团队成员，等于让多人共用同一个订阅额度。Cindy 官方的用户协议/服务条款是否允许这样做，请你自己确认；如果协议不允许，可能导致账号被限制或封禁，一切后果由你自行承担，与本项目及制作者无关。' }),
+        el('p', { class: 'team-note', textContent: `请先点下面的链接打开 Cindy 官网，在页脚找到“用户协议 / 服务条款”并认真阅读。点击后开始计时，满 ${secs} 秒才能确认（服务器记录时间，不可跳过）。` }),
+        el('div', {}, link('https://cindy.app', 'Cindy 国际版官网'), link('https://cindy.com.cn', 'Cindy 国内版官网')),
+        status,
+        el('label', { style: 'display:flex;gap:6px;align-items:flex-start' }, check, el('span', { textContent: '我已阅读 Cindy 用户协议，知道共享账号可能违反协议，愿意自行承担全部后果。' })),
+        go, msg);
+      return box;
+    };
     body.append(
+      ...[sharePanel()].filter(Boolean),
       el('p', { class: 'team-note', textContent: '绑定后，Cindy 官方账号的授权令牌会加密保存在服务器，仅属于你的本站账号；每个本站账号最多绑定 5 个，同一个 Cindy 账号只能绑定到一个本站账号。绑定不会改变你的本站登录方式。' }),
       accounts.length ? accounts.map(a => el('div', { class: 'team-row' },
         el('div', { class: 'grow' }, a.displayName + (a.orgName ? ' · ' + a.orgName : ''), el('small', { textContent: `${regionName(a.region)}　${a.email || '无邮箱'}　绑定于 ${fmt(a.boundAt)}　授权：${a.needsRebind ? '需要重新绑定' : '正常（访问令牌约 1 小时有效，到期前自动续期）'}　Cindy 模型 ${a.models}${a.shared ? '（已共享给全部成员）' : ''}${a.syncError ? '（同步失败：' + a.syncError + '）' : ''}` }), (() => { const box = el('div', { class: 'bal-card' }); cards.set(a.id, box); return box; })()),
-        el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' }, el('button', { type: 'button', class: 'secondary', textContent: '刷新余额', on: { click: () => showBilling(a) } }), el('a', { class: 'secondary', href: subscribeUrl(a), target: '_blank', rel: 'noopener noreferrer', textContent: '订阅（官方）', style: 'display:inline-flex;align-items:center;text-decoration:none;color:inherit' }), me.role === 'admin' ? el('button', { type: 'button', class: 'secondary', textContent: a.shared ? '取消共享' : '共享给成员', on: { click: async () => { if (!a.shared && !confirm('共享后，所有团队成员都能用这个 Cindy 账号的模型，调用会扣这个账号自己的余额（成员各自的每日/每月额度仍然生效）。\n\n请确认 Cindy 的服务条款允许把账号额度提供给他人使用。继续共享？')) return; try { await api('/api/cindy/accounts/' + a.id, { method: 'PATCH', body: JSON.stringify({ shared: !a.shared }) }); render(); loadModels(); } catch (e) { report.textContent = e.message; } } } }) : null,
+        el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' }, el('button', { type: 'button', class: 'secondary', textContent: '刷新余额', on: { click: () => showBilling(a) } }), el('a', { class: 'secondary', href: subscribeUrl(a), target: '_blank', rel: 'noopener noreferrer', textContent: '订阅（官方）', style: 'display:inline-flex;align-items:center;text-decoration:none;color:inherit' }), me.role === 'admin' && sharing && sharing.allowed ? el('button', { type: 'button', class: 'secondary', textContent: a.shared ? '取消共享' : '共享给成员', on: { click: async () => { if (!a.shared && !confirm('共享后，所有团队成员都能用这个 Cindy 账号的模型，调用会扣这个账号自己的余额（成员各自的每日/每月额度仍然生效）。\n\n请确认 Cindy 的服务条款允许把账号额度提供给他人使用。继续共享？')) return; try { await api('/api/cindy/accounts/' + a.id, { method: 'PATCH', body: JSON.stringify({ shared: !a.shared }) }); render(); loadModels(); } catch (e) { report.textContent = e.message; } } } }) : null,
           el('button', { type: 'button', class: 'secondary', textContent: '同步模型', on: { click: () => act(a, 'sync') } }), el('button', { type: 'button', class: 'secondary', textContent: '测试', on: { click: () => act(a, 'test') } }), el('button', { type: 'button', class: 'secondary', textContent: '解绑', on: { click: async () => { if (!confirm('解绑后服务器会删除这个账号的授权令牌，继续？')) return; await api('/api/cindy/accounts/' + a.id, { method: 'DELETE' }); render(); } } })))) : el('p', { class: 'team-note', textContent: '还没有绑定 Cindy 账号。' }),
       report, holder);
     for (const a of accounts) if (!a.needsRebind) loadBalance(cards.get(a.id), a.id, false); else cards.get(a.id).textContent = '授权失效，请解绑后重新绑定';

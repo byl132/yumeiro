@@ -63,13 +63,16 @@ const cindyCache=new Map();
 const mcpRegistryCache=new Map(),mcpMarketItems=new Map();
 const cindyProvider=account=>'cindy-'+account.id.slice(0,8);
 const userCindyAccounts=user=>(user?.cindyAccounts||[]);
-// 用户能用的 Cindy 账号 = 自己绑定的 + 主账号选择“共享给团队成员”的账号（共享的调用扣的是该账号自己的额度）
+// 团队共享 Cindy 账号：默认关闭。共用一个 Cindy 订阅额度是否允许，要看 Cindy 官方服务条款；确认允许后再用环境变量 CINDY_ALLOW_SHARED_ACCOUNTS=1 打开。
+const CINDY_SHARING_MIN_SECONDS=Math.max(0,Number(process.env.CINDY_SHARING_MIN_SECONDS)||120);
+const cindySharingAllowed=()=>process.env.CINDY_ALLOW_SHARED_ACCOUNTS==='1'||db.settings.allowCindyAccountSharing===true;
+// 用户能用的 Cindy 账号 = 自己绑定的 + （共享开关打开时）主账号选择“共享给团队成员”的账号（共享的调用扣的是该账号自己的额度）
 function accessibleCindyAccounts(user){
   if(!user)return Object.values(db.users).flatMap(item=>item.cindyAccounts||[]);
   const list=[...userCindyAccounts(user)];
   for(const owner of Object.values(db.users)){
     if(owner.id===user.id||owner.role!=='admin'||owner.disabled)continue;
-    for(const account of owner.cindyAccounts||[])if(account.shared&&!account.needsRebind)list.push(account);
+    for(const account of owner.cindyAccounts||[])if(account.shared&&!account.needsRebind&&cindySharingAllowed())list.push(account);
   }
   return list;
 }
@@ -2647,6 +2650,33 @@ const server=http.createServer(async(req,res)=>{
         return;
       }
     }
+    // 团队共享 Cindy 账号的开关（仅主账号）：默认关闭；打开前必须先“开始阅读”，等满 CINDY_SHARING_MIN_SECONDS 秒后才能确认自行承担后果（服务端计时，前端绕不过）
+    if(pathname==='/api/cindy/sharing'&&req.method==='GET'){
+      const ack=db.settings.cindySharingAck;
+      return json(res,200,{allowed:cindySharingAllowed(),byEnv:process.env.CINDY_ALLOW_SHARED_ACCOUNTS==='1',minSeconds:CINDY_SHARING_MIN_SECONDS,ack:ack?{email:ack.email,at:ack.at}:null,isAdmin});
+    }
+    if(pathname==='/api/cindy/sharing/start'&&req.method==='POST'){
+      if(!isAdmin)return json(res,403,{error:'只有主账号可以设置团队共享'});
+      db.settings.cindySharingRead={userId:session.user.id,at:Date.now()};await persist();
+      return json(res,200,{minSeconds:CINDY_SHARING_MIN_SECONDS});
+    }
+    if(pathname==='/api/cindy/sharing/accept'&&req.method==='POST'){
+      if(!isAdmin)return json(res,403,{error:'只有主账号可以设置团队共享'});
+      const body=await readBody(req).catch(()=>({})),read=db.settings.cindySharingRead;
+      if(body.accepted!==true)return json(res,400,{error:'需要明确确认自行承担后果'});
+      if(!read||read.userId!==session.user.id)return json(res,400,{error:'请先点“我已打开并阅读 Cindy 用户协议”开始计时'});
+      const left=Math.ceil(CINDY_SHARING_MIN_SECONDS-(Date.now()-read.at)/1000);
+      if(left>0)return json(res,400,{error:`阅读时间不足，还需要 ${left} 秒`,remaining:left});
+      db.settings.allowCindyAccountSharing=true;db.settings.cindySharingAck={userId:session.user.id,email:session.user.email,at:new Date().toISOString()};delete db.settings.cindySharingRead;await persist();
+      await recordSecurityEvent('cindy_sharing_enabled',req,session.user.id);
+      return json(res,200,{allowed:true});
+    }
+    if(pathname==='/api/cindy/sharing/revoke'&&req.method==='POST'){
+      if(!isAdmin)return json(res,403,{error:'只有主账号可以设置团队共享'});
+      db.settings.allowCindyAccountSharing=false;delete db.settings.cindySharingRead;await persist();
+      await recordSecurityEvent('cindy_sharing_disabled',req,session.user.id);
+      return json(res,200,{allowed:cindySharingAllowed()});
+    }
     // 已绑定的 Cindy 账号
     if(pathname==='/api/cindy/accounts'&&req.method==='GET'){
       refreshCindyModelsInBackground(session.user);
@@ -2698,6 +2728,7 @@ const server=http.createServer(async(req,res)=>{
       if(!account)return json(res,404,{error:'绑定记录不存在'});
       const body=await readBody(req);
       if(typeof body.shared!=='boolean')return json(res,400,{error:'shared 必须是布尔值'});
+      if(body.shared&&!cindySharingAllowed())return json(res,403,{error:'团队共享 Cindy 账号默认关闭：共用一个 Cindy 订阅额度是否允许，请先确认 Cindy 官方服务条款。确认允许后，在「绑定 Cindy 账号」页阅读 Cindy 用户协议并确认打开（或设置环境变量 CINDY_ALLOW_SHARED_ACCOUNTS=1）。'});
       if(body.shared&&!isAdmin)return json(res,403,{error:'只有主账号可以把 Cindy 账号共享给团队成员'});
       account.shared=body.shared;await persist();await recordSecurityEvent(body.shared?'cindy_account_shared':'cindy_account_unshared',req,session.user.id);
       return json(res,200,{account:safeCindyAccount(account)});
