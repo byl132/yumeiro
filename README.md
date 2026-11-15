@@ -1,12 +1,54 @@
-<p align="center"><img src="public/icon-512.png" width="128" alt="Yumeiro"></p>
+<p align="center"><img src="brand/banner.png" alt="Yumeiro · 团队共用的 AI 助手"></p>
+
+<p align="center">
+  <img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-blue">
+  <img alt="node" src="https://img.shields.io/badge/node-%E2%89%A518-339933">
+  <img alt="docker" src="https://img.shields.io/badge/deploy-Docker%20%7C%20%E7%9B%B4%E8%A3%85-2496ED">
+  <img alt="clients" src="https://img.shields.io/badge/clients-Web%20%7C%20Windows%20%7C%20Android%20%7C%20iOS%20%7C%20macOS-8A2BE2">
+</p>
 
 > **Powered by Yumeiro**  
 > 使用 Cindy、Dash黄一孟 的项目进行制作 · 制作者：BYL  
 > 以 Apache License 2.0 开源；使用、修改、分发请保留署名与许可证。 详见 [`LICENSE`](./LICENSE)、[`NOTICE`](./NOTICE) 与 [`商业化声明.md`](./商业化声明.md)。
 
-# Yumeiro 私有工作空间（自托管网页 + API）
+# Yumeiro · 团队共用的 AI 助手
+
+**一台服务器，一个团队，人人都能用 AI。** 自托管的私有 AI 工作空间：管理员给成员开账号、分额度，大家在网页、电脑和手机上共用同一套对话、智能体和技能。
 
 独立实现的自托管网页应用（与官方 Cindy 产品无隶属关系）：管理员（主账号）+ 团队成员、持久化对话、流式回复、智能体、OpenAI 兼容 API、按成员的用量统计与月度额度。数据存 PostgreSQL（可回退到加密 JSON 文件），用 Docker 部署。它不是官方 Cindy 桌面客户端的服务器版，不能复用 Cindy 客户端登录会话。
+
+## ✨ 特色
+
+| | |
+|---|---|
+| 👥 **团队共用** | 管理员 + 成员、每人独立对话、按成员的用量统计和每日/每月额度 |
+| 💬 **对话** | 流式回复、Markdown、附件（文字自动提取）、语音和图片理解 |
+| 🤖 **智能体 / 技能 / MCP** | 自定义智能体、技能工坊与市场、MCP 服务（仅管理员开启） |
+| 🔌 **模型** | 兼容 OpenAI 接口，可接自己的模型服务，也可绑定 Cindy 账号使用托管模型 |
+| 🖥️ **多端客户端** | 网页 · Windows · Android（原生）· iPhone / iPad / Mac（SwiftUI 源码），以及桌宠 |
+| 🛡️ **自己的数据** | 数据在你自己的服务器：PostgreSQL（可回退到加密 JSON），密钥分目录保存，Docker 或直装都行 |
+
+## 🚀 快速开始
+
+```sh
+unzip Yumeiro-<版本>.zip && cd Yumeiro
+chmod +x install.sh && ./install.sh     # 向导式配置，结束后按提示 docker compose up -d --build
+```
+
+详细步骤见下面的「一、安装」和 [`安装说明.md`](./安装说明.md)；没有 Docker 请看 [`非Docker安装说明.md`](./非Docker安装说明.md)；日常用法见 [`使用说明.md`](./使用说明.md)。
+
+## 📦 客户端
+
+| 平台 | 位置 |
+|---|---|
+| 网页 / PWA | 服务器自带，浏览器直接打开 |
+| Windows | `clients/windows/`（Electron），安装版 + 便携版 |
+| Android | `clients/android-native/`（Kotlin / Compose） |
+| iPhone / iPad / Mac | `clients/apple/`（SwiftUI，需在 Mac 上用 Xcode 编译） |
+
+## 📄 许可与署名
+
+以 [Apache License 2.0](./LICENSE) 开源，使用、修改、分发（包括商用）请保留署名和许可证。第三方声明见 [`NOTICE`](./NOTICE)，关于 Cindy 在线服务条款和美术素材的提醒见 [`商业化声明.md`](./商业化声明.md)。
 
 ## 一、安装（华为云 / 任意 Linux + Docker）
 
