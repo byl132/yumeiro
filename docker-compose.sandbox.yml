@@ -1,0 +1,39 @@
+# 代码沙箱（可选，需要先启用 docker-compose.runner.yml）：
+#  - 独立容器，跑在 internal 网络里：不能访问外网，也不能访问应用、数据库；
+#  - 不挂载任何卷、不带任何密钥：运行器把“当前工作区的文件副本”发进来，跑完把改动送回去；
+#  - 非 root、丢弃全部能力、只读根文件系统，限制内存 / CPU / 进程数；
+#  - 里面只有 python3 / node / bash（python 需要构建运行器镜像时 INSTALL_UV=1）。
+services:
+  sandbox:
+    build:
+      context: ./runner
+      args:
+        NODE_IMAGE: ${RUNNER_NODE_IMAGE:-node:22-slim}
+        NPM_REGISTRY: ${NPM_REGISTRY:-}
+        INSTALL_UV: ${INSTALL_UV:-1}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}
+    restart: unless-stopped
+    environment:
+      PORT: 8790
+      SANDBOX_ONLY: "1"
+      WORKSPACES_DIR: /tmp/unused
+      RUNNER_TOKEN_FILE: /run/secrets/runner_token
+      SANDBOX_MAX_CONCURRENT: ${SANDBOX_MAX_CONCURRENT:-4}
+      SANDBOX_MAX_SYNC_MB: ${SANDBOX_MAX_SYNC_MB:-20}
+      SANDBOX_MAX_TIMEOUT_SEC: ${SANDBOX_MAX_TIMEOUT_SEC:-120}
+    secrets: [runner_token]
+    networks: [sandboxnet]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: ["/tmp:size=${SANDBOX_TMP_SIZE:-512m}"]
+    pids_limit: ${SANDBOX_PIDS_LIMIT:-128}
+    mem_limit: ${SANDBOX_MEM_LIMIT:-1g}
+    cpus: ${SANDBOX_CPUS:-1}
+  runner:
+    environment:
+      SANDBOX_URL: http://sandbox:8790
+    networks: [agentnet, sandboxnet]
+networks:
+  sandboxnet:
+    internal: true

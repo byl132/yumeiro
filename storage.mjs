@@ -37,7 +37,7 @@ export async function poolConfig(env = process.env) {
 }
 
 // ---------- 数据模型 ↔ 行 ----------
-const COLLECTIONS = { users: 'user', sessions: 'session', conversations: 'conversation', tokens: 'token', agents: 'agent', stats: 'stats', providers: 'provider', workspaces: 'workspace', runs: 'run', skills: 'skill', bots: 'bot', memories: 'memory', images: 'image' };
+const COLLECTIONS = { users: 'user', sessions: 'session', conversations: 'conversation', tokens: 'token', agents: 'agent', stats: 'stats', providers: 'provider', workspaces: 'workspace', runs: 'run', skills: 'skill', bots: 'bot', memories: 'memory', images: 'image', groups: 'group' };
 
 // 把内存数据展开成 Map<"kind\u0000id", {kind,id,owner,json}>；usage 明细每条一行。
 export function flatten(db) {
@@ -54,7 +54,7 @@ export function flatten(db) {
 }
 
 export function assemble(rows) {
-  const db = { users: {}, sessions: {}, conversations: {}, tokens: {}, agents: {}, providers: {}, workspaces: {}, runs: {}, skills: {}, bots: {}, memories: {}, images: {}, usage: [], audit: [], security: {}, settings: {} };
+  const db = { users: {}, sessions: {}, conversations: {}, tokens: {}, agents: {}, providers: {}, workspaces: {}, runs: {}, skills: {}, bots: {}, memories: {}, images: {}, groups: {}, usage: [], audit: [], security: {}, settings: {} };
   const byKind = Object.fromEntries(Object.entries(COLLECTIONS).map(([collection, kind]) => [kind, collection]));
   for (const { kind, id, value } of rows) {
     if (byKind[kind]) {

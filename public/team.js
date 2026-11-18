@@ -865,7 +865,7 @@
     const addRow = preset => {
       const target = targetSelect();
       const label = el('input', { placeholder: '名称', maxLength: 30, value: preset?.label || '' }), role = el('input', { placeholder: '职责（可选）', maxLength: 200, value: preset?.role || '' });
-      const modeSel = el('select', {}, el('option', { value: 'readonly', textContent: '只读' }), el('option', { value: 'edit', textContent: '可改文件' }));
+      const modeSel = el('select', {}, el('option', { value: 'readonly', textContent: '只读' }), el('option', { value: 'edit', textContent: '可改文件' }), el('option', { value: 'exec', textContent: '可改文件 + 运行代码（沙箱）' }));
       if (preset) { const i = targets().findIndex(t => t.type === preset.type && t.id === preset.id && (preset.model === undefined || t.model === preset.model)); if (i >= 0) target.value = i; if (preset.mode) modeSel.value = preset.mode; }
       const row = el('div', { class: 'team-row5' }, label, target, role, modeSel, el('button', { type: 'button', class: 'secondary', textContent: '移除', on: { click: () => row.remove() } }));
       row.read = () => { const t = targets()[Number(target.value)]; return t.type === 'engine' ? { kind: 'engine', engine: t.id, model: t.model || undefined, label: label.value, role: role.value, mode: modeSel.value } : { kind: 'agent', agentId: t.id || undefined, label: label.value, role: role.value }; };
@@ -1021,15 +1021,26 @@
     draw();
   }
 
+  async function sandboxCard() {
+    const info = await api('/api/sandbox'), err = errBox();
+    const enabled = el('input', { type: 'checkbox', checked: info.enabled }), members = el('input', { type: 'checkbox', checked: info.membersAllowed }), timeout = el('input', { type: 'number', min: 1, max: 120, value: info.timeoutSec, style: 'width:80px' });
+    return el('div', { class: 'team-card' },
+      el('h4', { textContent: '代码沙箱' }),
+      el('p', { class: 'team-note', textContent: '让对话里的代码块能点“运行”，也让引擎选择“在沙箱里运行代码”。代码在单独的断网容器里执行，只带当前工作区的文件副本，没有外网、没有任何密钥。需要在安装向导里选择安装沙箱（docker-compose.sandbox.yml）。' }),
+      !info.configured ? el('div', { class: 'team-err', textContent: '还没有检测到沙箱容器：运行 ./install.sh --reconfigure 选择安装代码沙箱，或在 COMPOSE_FILE 里加入 docker-compose.sandbox.yml。' }) : null,
+      el('div', { class: 'team-form' }, el('label', {}, enabled, ' 启用'), el('label', {}, members, ' 团队成员可用'), el('label', {}, '单次最长（秒）', timeout),
+        el('button', { type: 'button', textContent: '保存', on: { click: async () => { try { await api('/api/admin/sandbox', { method: 'PUT', body: JSON.stringify({ enabled: enabled.checked, membersAllowed: members.checked, timeoutSec: Number(timeout.value) }) }); err.textContent = '已保存'; } catch (x) { err.textContent = x.message; } } } }), err));
+  }
+
   async function renderEngines(body) {
     const data = await api('/api/admin/engines'), err = errBox();
-    body.append(
+    body.append(await sandboxCard().catch(() => el('span')),
       el('p', { class: 'team-note', textContent: 'Claude Code、Codex、Pi 运行在独立的“运行器”容器里（安装向导里选择安装），只能读写各工作区的目录，不开放任意 shell 命令。这里配置每个引擎的模型密钥和谁可以使用。' }),
       !data.runner ? el('div', { class: 'team-err', textContent: '还没有配置运行器：请运行 ./install.sh --reconfigure 并选择安装智能体运行器，或手动设置 RUNNER_URL / RUNNER_TOKEN。' }) : data.runnerError ? el('div', { class: 'team-err', textContent: '运行器不可用：' + data.runnerError }) : null, err);
     for (const e of data.engines) {
       const f = {
         enabled: el('input', { type: 'checkbox', checked: e.enabled }), members: el('input', { type: 'checkbox', checked: e.membersAllowed }),
-        maxMode: el('select', {}, el('option', { value: 'readonly', textContent: '只读（只能看文件）' }), el('option', { value: 'edit', textContent: '可读写工作区文件' })),
+        maxMode: el('select', {}, el('option', { value: 'readonly', textContent: '只读（只能看文件）' }), el('option', { value: 'edit', textContent: '可读写工作区文件' }), el('option', { value: 'exec', textContent: '可读写 + 在沙箱里运行代码' })),
         apiKey: el('input', { type: 'password', autocomplete: 'off', placeholder: e.hasKey ? '已保存 ' + e.keyMask + '，留空保持不变' : 'API Key' }),
         baseUrl: el('input', { placeholder: e.engine === 'claude' ? 'Anthropic 兼容地址（可选，默认官方）' : e.engine === 'codex' ? 'OpenAI 兼容地址（可选，默认官方）' : '（Pi 不使用）', value: e.baseUrl, disabled: e.engine === 'pi' }),
         model: el('input', { placeholder: '默认模型（可选）', value: e.model }),

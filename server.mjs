@@ -17,7 +17,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openStorage, readSecretKey } from './storage.mjs';
 import { modelAccessBase, fetchGatewayCredentials, fetchModelCatalog, detectChatBase, pingChat, accessTokenExpiry, CindyModelError, modelEngines as cindyEngines } from './platform-models.mjs';
-import { runCollaboration, validatePlan, LIMITS } from './collab.mjs';
+import { runCollaboration, validatePlan, LIMITS, runPmTeam, PM_LIMITS } from './collab.mjs';
 import { BUILTIN_SKILLS, BUILTIN_BOTS, ENGINE_HINTS } from './market.mjs';
 import { createMarketSources } from './market-sources.mjs';
 import { LANGS as ASR_LANGS, PRESETS as ASR_PRESETS, AUDIO_TYPES, MAX_AUDIO_BYTES, normalizeAsrConfig, publicAsrConfig, asrKinds, silenceWav, transcribe as asrTranscribe } from './asr.mjs';
@@ -140,7 +140,7 @@ const storage=await openStorage({key:storeKey,dataDir});
 let db=storage.db;
 console.log('数据存储：'+storage.describe);
 db.users||={};db.sessions||={};db.conversations||={};db.memories||={};db.images||={};db.attachments||={};db.remoteDevices||={};db.audit||=[];
-db.usage||=[];db.security||={};db.tokens||={};db.agents||={};db.providers||={};db.settings||={};db.workspaces||={};db.runs||={};db.skills||={};db.bots||={};
+db.groups||={};db.usage||=[];db.security||={};db.tokens||={};db.agents||={};db.providers||={};db.settings||={};db.workspaces||={};db.runs||={};db.skills||={};db.bots||={};
 db.security.loginPolicy||={adminAllowedIps:[],maxFailedAttempts:5,windowMinutes:15,maxSessions:5};
 db.security.events||=[];
 for(const user of Object.values(db.users))if(!user.role)user.role=user.passwordHash?'admin':'member';
@@ -671,6 +671,7 @@ function removeUserData(userId){
   for(const [key,value]of Object.entries(db.sessions))if(value.userId===userId)delete db.sessions[key];
   for(const [key,value]of Object.entries(db.tokens))if(value.userId===userId)delete db.tokens[key];
   for(const [key,value]of Object.entries(db.conversations))if(value.userId===userId)delete db.conversations[key];
+  for(const [key,value]of Object.entries(db.groups||{}))if(value.userId===userId)delete db.groups[key];
   for(const [key,value]of Object.entries(db.agents))if(value.ownerId===userId)delete db.agents[key];
   for(const [key,value]of Object.entries(db.memories))if(value.userId===userId||value.ownerId===userId)delete db.memories[key];
   delete db.stats[userId];
@@ -820,7 +821,69 @@ const runnerToken=process.env.RUNNER_TOKEN_FILE?(await readFile(process.env.RUNN
 const runnerEnabled=Boolean(runnerUrl&&runnerToken);
 const uploadLimit=Math.min(200,Math.max(1,Number(process.env.WORKSPACE_UPLOAD_MAX_MB)||25))*1048576;
 const ENGINES=['claude','codex','pi'],ENGINE_LABELS={claude:'Claude Code',codex:'Codex',pi:'Pi'};
-const MODE_RANK={readonly:0,edit:1};
+const MODE_RANK={readonly:0,edit:1,exec:2};
+const normMode=value=>MODE_RANK[value]!==undefined?value:'readonly';
+// ---- 代码沙箱：断网容器里跑 python / node / bash。设置里 enabled 总开关、membersAllowed 成员可用 ----
+const sandboxConfig=()=>({enabled:Boolean(db.settings.sandbox?.enabled),membersAllowed:Boolean(db.settings.sandbox?.membersAllowed),timeoutSec:Math.min(120,Math.max(1,Number(db.settings.sandbox?.timeoutSec)||30))});
+const sandboxAllowed=user=>{const c=sandboxConfig();return runnerEnabled&&c.enabled&&(user.role==='admin'||c.membersAllowed)};
+const sandboxBusy=new Set();
+// ---- 多智能体群聊 ----
+const busyGroups=new Set();
+const GROUP_MODES=['pm','chat','roundtable','pipeline','supervisor'];
+const PM_DEFAULT_ROLE='产品经理：理解用户目标，按成员的身份和擅长拆解并分配任务，整合成果后答复用户。';
+const safeGroup=group=>({id:group.id,title:group.title,createdAt:group.createdAt,updatedAt:group.updatedAt,mode:group.mode,rounds:group.rounds,count:group.messages.length,pm:group.pm?{label:group.pm.label,agentId:group.pm.agentId||null,model:group.pm.model||null}:null,members:group.members.map(member=>({strengths:member.strengths||'',label:member.label,agentId:member.agentId||null,agentName:member.agentId?db.agents[member.agentId]?.name||'（智能体已删除）':null,model:member.model||null,role:member.role||''}))});
+function parseGroupBody(body,user,existing){
+  const title=String(body.title??existing?.title??'').replace(/\s+/g,' ').trim().slice(0,60);
+  const mode=String(body.mode??existing?.mode??'pm');
+  if(!GROUP_MODES.includes(mode))throw fail(400,'群聊方式不支持：'+mode);
+  const rounds=Math.min(mode==='pm'?PM_LIMITS.rounds:LIMITS.rounds,Math.max(1,Math.floor(Number(body.rounds??existing?.rounds??(mode==='pm'?4:2)))||2));
+  const raw=body.members??existing?.members,maxMembers=mode==='pm'?PM_LIMITS.members:LIMITS.participants;
+  if(!Array.isArray(raw)||raw.length<1||raw.length>maxMembers)throw fail(400,'群里需要 1–'+maxMembers+' 位成员');
+  const labels=new Set(),checkLabel=label=>{
+    if(/[@\s]/.test(label))throw fail(400,'名称不能含空格或 @：'+label);
+    if(labels.has(label))throw fail(400,'名称不能重复：'+label);
+    labels.add(label);
+  };
+  let pm=null;
+  if(mode==='pm'){
+    const item=body.pm??existing?.pm??{label:'产品经理'};
+    const resolved=resolveParticipant({kind:'agent',agentId:item.agentId,model:item.model,label:item.label||'产品经理',role:PM_DEFAULT_ROLE},user,null);
+    checkLabel(resolved.label);
+    pm={label:resolved.label,agentId:resolved.agentId||null,model:String(item.model||'').slice(0,200)};
+  }
+  const members=raw.map(item=>{
+    const resolved=resolveParticipant({kind:'agent',agentId:item?.agentId,model:item?.model,label:item?.label,role:item?.role},user,null);
+    checkLabel(resolved.label);
+    return {label:resolved.label,agentId:resolved.agentId||null,model:String(item?.model||'').slice(0,200),role:resolved.role,strengths:String(item?.strengths||'').trim().slice(0,200)};
+  });
+  if(mode==='supervisor'||mode==='roundtable'){if(members.length<2)throw fail(400,'这种方式至少需要 2 位成员')}
+  return {title,mode,rounds,members,pm};
+}
+const GROUP_CONTEXT_CHARS=20000;
+function renderGroupTranscript(messages){
+  const text=messages.slice(-40).map(m=>'【'+(m.role==='user'?'用户':m.label)+'】\n'+m.content).join('\n\n');
+  return text.length>GROUP_CONTEXT_CHARS?'…（更早的记录已省略）\n'+text.slice(text.length-GROUP_CONTEXT_CHARS):text;
+}
+// 群聊（chat 方式）：@谁谁回复；没有 @ 则所有人按顺序回复。回复里再 @ 到别人，被点名的人会接着发言（一轮最多 8 次发言）。
+async function runGroupChat({message,history,participants,call,signal,emit,remember}){
+  const mentioned=text=>participants.filter(p=>text.includes('@'+p.label));
+  const queue=(mentioned(message).length?mentioned(message):participants).slice(),turn=[],spokenSet=new Set();
+  const roster=participants.map(p=>p.label+(p.role?'（'+p.role+'）':'')).join('、');
+  let spoken=0;
+  while(queue.length&&spoken<8){
+    if(signal.aborted)break;
+    const participant=queue.shift();
+    spokenSet.add(participant.label);spoken++;
+    const context=renderGroupTranscript([...history,{role:'user',content:message},...turn]);
+    const prompt='这是一个多智能体群聊。群成员：用户、'+roster+'。\n\n聊天记录：\n'+context+'\n\n现在轮到你（'+participant.label+'）发言。直接说内容，不要加“【名字】”前缀。需要某位成员接着回答时，在话里写 @成员名。';
+    emit('turn_start',{label:participant.label});
+    const out=await call(participant,prompt,text=>emit('delta',{label:participant.label,text}),signal,'你的名字是“'+participant.label+'”，正在和用户及其他智能体群聊。回复要简洁，直接针对讨论。');
+    remember(participant.label,out.text,out.aborted);emit('turn_end',{label:participant.label});
+    if(out.aborted)break;
+    turn.push({role:'agent',label:participant.label,content:out.text});
+    for(const next of mentioned(out.text))if(next.label!==participant.label&&!spokenSet.has(next.label)&&!queue.includes(next))queue.push(next);
+  }
+}
 const PI_KEY_NAMES={anthropic:'ANTHROPIC_API_KEY',openai:'OPENAI_API_KEY',google:'GEMINI_API_KEY',gemini:'GEMINI_API_KEY',deepseek:'DEEPSEEK_API_KEY',groq:'GROQ_API_KEY',openrouter:'OPENROUTER_API_KEY',xai:'XAI_API_KEY',mistral:'MISTRAL_API_KEY'};
 const activeRuns=new Map();
 const runnerFetch=(pathname,init={})=>fetch(runnerUrl+pathname,{...init,redirect:'error',headers:{Authorization:'Bearer '+runnerToken,...(init.headers||{})}});
@@ -845,7 +908,7 @@ function engineEnv(engine,config){
 }
 const safeEngine=(engine,health,user)=>{
   const config=engineConfig(engine);
-  return {engine,label:ENGINE_LABELS[engine],installed:Boolean(health?.engines?.[engine]?.installed),version:health?.engines?.[engine]?.version||null,enabled:Boolean(config.enabled),membersAllowed:Boolean(config.membersAllowed),maxMode:config.maxMode==='edit'?'edit':'readonly',model:config.model||'',models:config.models||[],hint:ENGINE_HINTS[engine],baseUrl:config.baseUrl||'',provider:config.provider||'',keyMask:maskKey(config.apiKey||''),hasKey:Boolean(config.apiKey)};
+  return {engine,label:ENGINE_LABELS[engine],installed:Boolean(health?.engines?.[engine]?.installed),version:health?.engines?.[engine]?.version||null,enabled:Boolean(config.enabled),membersAllowed:Boolean(config.membersAllowed),maxMode:normMode(config.maxMode),model:config.model||'',models:config.models||[],hint:ENGINE_HINTS[engine],baseUrl:config.baseUrl||'',provider:config.provider||'',keyMask:maskKey(config.apiKey||''),hasKey:Boolean(config.apiKey)};
 };
 // 在运行器里执行一次智能体调用，逐段回调文本；返回最终文本与用量。
 async function runEngine({engine,prompt,workspaceId,mode,system,model,gateway,signal,onDelta,userId}){
@@ -940,7 +1003,8 @@ function resolveParticipant(item,user,health){
   if(kind==='engine'){
     const engine=String(item.engine||'');
     if(!ENGINES.includes(engine)||!availableEngines(user,health).includes(engine))throw fail(400,'引擎不可用：'+(ENGINE_LABELS[engine]||engine)+'（需要管理员安装并启用）');
-    const cap=engineConfig(engine).maxMode==='edit'?'edit':'readonly',wanted=item.mode==='edit'?'edit':'readonly';
+    const cap=normMode(engineConfig(engine).maxMode),wanted=normMode(item.mode);
+    if(wanted==='exec'&&MODE_RANK[cap]>=MODE_RANK.exec&&!sandboxAllowed(user))throw fail(400,'代码沙箱没有启用，不能使用“可运行代码”模式');
     const config=engineConfig(engine),wantedModel=String(item.model||'').trim();
     const gateway=wantedModel.startsWith('cindy-')?gatewayFor(wantedModel,engine,user):null;
     const model=gateway?gateway.model:wantedModel&&(wantedModel===config.model||(config.models||[]).includes(wantedModel))?wantedModel:'';
@@ -1229,6 +1293,7 @@ const staticFiles={
   '/pet.js':{name:'pet.js',type:'text/javascript; charset=utf-8'},
   '/pet-sense.js':{name:'pet-sense.js',type:'text/javascript; charset=utf-8'},
   '/side.js':{name:'side.js',type:'text/javascript; charset=utf-8'},
+  '/group.js':{name:'group.js',type:'text/javascript; charset=utf-8'},
   '/side-tools.js':{name:'side-tools.js',type:'text/javascript; charset=utf-8'},
   '/recover.js':{name:'recover.js',type:'text/javascript; charset=utf-8'},
   '/pet/idle.png':{name:'pet/idle.png',type:'image/png'},
@@ -2209,7 +2274,34 @@ const server=http.createServer(async(req,res)=>{
     // 智能体引擎（Claude Code / Codex / Pi）：主管理员配置；成员只看到被放行且已安装的
     if(pathname==='/api/engines'&&req.method==='GET'){
       const health=await runnerHealth();
-      return json(res,200,{runner:runnerEnabled,ok:Boolean(health?.ok),engines:availableEngines(session.user,health).map(engine=>{const config=engineConfig(engine);return {engine,label:ENGINE_LABELS[engine],maxMode:config.maxMode==='edit'?'edit':'readonly',family:ENGINE_HINTS[engine].family,defaultModel:config.model||'',models:[...new Set([config.model,...(config.models||[])].filter(Boolean))]}})});
+      return json(res,200,{runner:runnerEnabled,ok:Boolean(health?.ok),engines:availableEngines(session.user,health).map(engine=>{const config=engineConfig(engine);return {engine,label:ENGINE_LABELS[engine],maxMode:normMode(config.maxMode),family:ENGINE_HINTS[engine].family,defaultModel:config.model||'',models:[...new Set([config.model,...(config.models||[])].filter(Boolean))]}})});
+    }
+    // 代码沙箱：成员在对话里点“运行”，或工作区里的智能体用 exec 模式；代码在断网的沙箱容器里执行
+    if(pathname==='/api/sandbox'&&req.method==='GET'){
+      const config=sandboxConfig(),health=runnerEnabled?await runnerHealth():null;
+      return json(res,200,{available:sandboxAllowed(session.user)&&Boolean(health?.ok&&health.sandboxConfigured),enabled:config.enabled,membersAllowed:config.membersAllowed,configured:Boolean(health?.sandboxConfigured),runner:runnerEnabled,timeoutSec:config.timeoutSec,languages:['python','node','bash'],isAdmin});
+    }
+    if(pathname==='/api/admin/sandbox'&&req.method==='PUT'){
+      if(!isAdmin)return adminOnly();
+      const body=await readBody(req),current=sandboxConfig();
+      db.settings.sandbox={enabled:typeof body.enabled==='boolean'?body.enabled:current.enabled,membersAllowed:typeof body.membersAllowed==='boolean'?body.membersAllowed:current.membersAllowed,timeoutSec:body.timeoutSec===undefined?current.timeoutSec:Math.min(120,Math.max(1,Math.floor(Number(body.timeoutSec))||30))};
+      await persist();await recordSecurityEvent('sandbox_updated',req,session.user.id,db.settings.sandbox);
+      return json(res,200,{sandbox:sandboxConfig()});
+    }
+    if(pathname==='/api/sandbox/run'&&req.method==='POST'){
+      if(!sandboxAllowed(session.user))return json(res,403,{error:'代码沙箱没有启用，请联系管理员'});
+      const body=await readBody(req,300*1024),language=String(body.language||''),code=String(body.code??''),command=body.command===undefined?'':String(body.command);
+      if(!code.trim()&&!command.trim())return json(res,400,{error:'没有要运行的代码'});
+      let workspaceId='sbx-'+session.user.id;
+      if(body.workspace){const workspace=workspaceFor(String(body.workspace),session.user);if(!workspace)return json(res,404,{error:'工作区不存在'});workspaceId=workspace.id}
+      if(sandboxBusy.has(session.user.id))return json(res,429,{error:'上一段代码还在运行，请稍候'});
+      sandboxBusy.add(session.user.id);
+      try{
+        addAudit(db,{userId:session.user.id,action:'sandbox.run',target:workspaceId,detail:(language||'command')+' · '+(code||command).length+' 字符'});
+        const result=await runnerJson('/exec',{method:'POST',headers:{'Content-Type':'application/json'},signal:AbortSignal.timeout((sandboxConfig().timeoutSec+40)*1000),body:JSON.stringify({workspace:workspaceId,language,code,command:command||undefined,timeoutSec:sandboxConfig().timeoutSec})});
+        return json(res,200,result);
+      }catch(error){return json(res,error.status&&error.status<500?error.status:502,{error:error.message||'沙箱执行失败'})}
+      finally{sandboxBusy.delete(session.user.id)}
     }
     if(pathname==='/api/admin/engines'&&req.method==='GET'){
       if(!isAdmin)return adminOnly();
@@ -2268,7 +2360,7 @@ const server=http.createServer(async(req,res)=>{
       const model=body.model===undefined?current.model||'':String(body.model).trim().slice(0,200);
       const models=body.models===undefined?(current.models||[]):cleanModels(body.models).filter(item=>/^[A-Za-z0-9._:\/-]{1,120}$/.test(item)).slice(0,50);
       db.settings.engines||={};
-      db.settings.engines[engine]={enabled:typeof body.enabled==='boolean'?body.enabled:Boolean(current.enabled),membersAllowed:typeof body.membersAllowed==='boolean'?body.membersAllowed:Boolean(current.membersAllowed),maxMode:body.maxMode==='edit'?'edit':body.maxMode==='readonly'?'readonly':(current.maxMode||'readonly'),apiKey:typedKey||current.apiKey||'',baseUrl,provider,model,models};
+      db.settings.engines[engine]={enabled:typeof body.enabled==='boolean'?body.enabled:Boolean(current.enabled),membersAllowed:typeof body.membersAllowed==='boolean'?body.membersAllowed:Boolean(current.membersAllowed),maxMode:MODE_RANK[body.maxMode]!==undefined?body.maxMode:normMode(current.maxMode),apiKey:typedKey||current.apiKey||'',baseUrl,provider,model,models};
       await persist();await recordSecurityEvent('engine_updated',req,session.user.id,{engine});
       return json(res,200,{engine:safeEngine(engine,await runnerHealth())});
     }
@@ -3387,6 +3479,88 @@ const server=http.createServer(async(req,res)=>{
         recordUsage(session.user.id,result.usage,ref,'translate');await persist();
         return json(res,200,{text:result.reply});
       }catch(error){return json(res,error.status||502,{error:error.message||'翻译失败'})}
+    }
+    // ---- 多智能体群聊接口 ----
+    const groupMatch=pathname.match(/^\/api\/groups\/([0-9a-f-]+)(\/send)?$/i);
+    if(pathname==='/api/groups'&&req.method==='GET')return json(res,200,{groups:Object.values(db.groups).filter(g=>g.userId===session.user.id).sort((a,b)=>b.updatedAt-a.updatedAt).map(safeGroup)});
+    if(pathname==='/api/groups'&&req.method==='POST'){
+      if(Object.values(db.groups).filter(g=>g.userId===session.user.id).length>=50)return json(res,400,{error:'群聊数量已达上限（50）'});
+      const body=await readBody(req);let settings;
+      try{settings=parseGroupBody(body,session.user)}catch(error){return json(res,error.status||400,{error:error.message})}
+      const now=Date.now(),group={id:randomUUID(),userId:session.user.id,title:settings.title||'新群聊',createdAt:now,updatedAt:now,members:settings.members,pm:settings.pm,mode:settings.mode,rounds:settings.rounds,messages:[]};
+      db.groups[group.id]=group;await persist();return json(res,201,{group:safeGroup(group)});
+    }
+    if(groupMatch){
+      const group=db.groups[groupMatch[1]];
+      if(!group||group.userId!==session.user.id)return json(res,404,{error:'群聊不存在'});
+      if(!groupMatch[2]){
+        if(req.method==='GET')return json(res,200,{group:safeGroup(group),messages:group.messages});
+        if(req.method==='DELETE'){if(busyGroups.has(group.id))return json(res,409,{error:'群聊正在回复，请先停止'});delete db.groups[group.id];await persist();return json(res,200,{ok:true})}
+        if(req.method==='PATCH'){
+          if(busyGroups.has(group.id))return json(res,409,{error:'群聊正在回复，请稍候'});
+          const body=await readBody(req);let settings;
+          try{settings=parseGroupBody(body,session.user,group)}catch(error){return json(res,error.status||400,{error:error.message})}
+          Object.assign(group,{title:settings.title||group.title,members:settings.members,pm:settings.pm,mode:settings.mode,rounds:settings.rounds,updatedAt:Date.now()});
+          await persist();return json(res,200,{group:safeGroup(group)});
+        }
+      }else if(req.method==='POST'){
+        const body=await readBody(req),message=String(body.message||'').trim();
+        if(!message||message.length>12000)return json(res,400,{error:'消息不能为空，且不能超过 12000 个字符'});
+        if(busyGroups.has(group.id))return json(res,409,{error:'群聊正在回复，请稍候或先停止'});
+        let participants;
+        let pmParticipant=null;
+        try{participants=group.members.map(member=>({...resolveParticipant({kind:'agent',...member},session.user,null),strengths:member.strengths||'',modelName:member.model||''}));if(group.mode==='pm')pmParticipant=resolveParticipant({kind:'agent',...group.pm,role:PM_DEFAULT_ROLE},session.user,null)}
+        catch(error){return json(res,error.status||400,{error:error.message})}
+        {const over=quotaError(session.user);if(over)return json(res,429,{error:over})}
+        busyGroups.add(group.id);
+        const history=group.messages.slice(),now=Date.now();
+        group.messages.push({role:'user',content:message,createdAt:now});
+        if(!history.length&&group.title==='新群聊')group.title=message.replace(/\s+/g,' ').slice(0,40);
+        group.updatedAt=now;await persist();
+        res.writeHead(200,{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-store, no-transform','X-Accel-Buffering':'no','X-Content-Type-Options':'nosniff'});
+        const send=(event,data)=>{if(!res.writableEnded&&!res.destroyed)res.write('event: '+event+'\ndata: '+JSON.stringify(data)+'\n\n')};
+        const abort=new AbortController();res.on('close',()=>{if(!res.writableEnded)abort.abort()});
+        send('start',{group:safeGroup(group)});
+        const remember=(label,text,partial)=>{if(String(text).trim())group.messages.push({role:'agent',label,content:text,createdAt:Date.now(),...(partial?{partial:true}:{})})};
+        const callModel=async(participant,prompt,onDelta,signal,extraSystem)=>{
+          const limit=quotaError(session.user);if(limit)throw fail(429,limit);
+          const result=await streamModel([{role:'user',content:prompt}],onDelta,signal,participant.model,[participant.system,extraSystem].filter(Boolean).join('\n\n'));
+          recordUsage(session.user.id,result.usage,participant.model,'group');await persist();
+          return {text:result.reply,usage:result.usage,aborted:result.aborted};
+        };
+        try{
+          if(group.mode==='pm'){
+            await runPmTeam({message,history:history.map(m=>({label:m.role==='user'?'用户':m.label,text:m.content})),pm:pmParticipant,members:participants,maxRounds:group.rounds,signal:abort.signal,
+              call:({participant,prompt,onDelta,signal})=>callModel(participant,prompt,onDelta,signal,participant===pmParticipant?'':'你的名字是“'+participant.label+'”，是团队成员，按产品经理分配的任务交付。'),
+              emit:event=>{
+                if(event.type==='turn_start')send('turn_start',{label:event.label,task:event.task||null});
+                else if(event.type==='delta')send('delta',{label:event.label,text:event.text});
+                else if(event.type==='turn_end'){remember(event.label,event.text);send('turn_end',{label:event.label})}
+                else if(event.type==='done'&&event.status!=='completed')send('note',{text:'已达到分配轮数上限，产品经理已直接汇总'});
+              }});
+          }
+          else if(group.mode==='chat')await runGroupChat({message,history,participants,call:callModel,signal:abort.signal,emit:send,remember});
+          else{
+            const context=renderGroupTranscript(history),labels=new Map();
+            const task=context?'（此前的群聊记录）\n'+context+'\n\n（用户这次的要求）\n'+message:message;
+            const result=await runCollaboration({task,mode:group.mode,participants,rounds:group.rounds,maxSteps:8,signal:abort.signal,
+              call:({participant,prompt,onDelta,signal})=>callModel(participant,prompt,onDelta,signal,''),
+              emit:event=>{
+                if(event.type==='step_start'){labels.set(event.index,event.label);send('turn_start',{label:event.label,round:event.round||null,summary:Boolean(event.summary)})}
+                else if(event.type==='delta')send('delta',{label:labels.get(event.index),text:event.text});
+                else if(event.type==='step_end'){remember(event.label,event.text);send('turn_end',{label:event.label})}
+              }});
+            if(result.status!=='completed')send('note',{text:{stopped:'已停止',step_limit:'已达到步数上限',bad_decision:'主管没有给出有效的调度'}[result.status]||result.status});
+          }
+        }catch(error){
+          if(!error.aborted&&!abort.signal.aborted){console.error('群聊失败：',error.message);send('error',{error:error.message||'群聊失败'})}
+        }finally{
+          group.updatedAt=Date.now();busyGroups.delete(group.id);
+          try{await persist()}catch{}
+          send('done',{group:safeGroup(group)});res.end();
+        }
+        return;
+      }
     }
     if(req.method==='GET'&&pathname==='/api/conversations'){
       const items=Object.values(db.conversations).filter(item=>item.userId===session.user.id&&!item.botId).sort((a,b)=>b.updatedAt-a.updatedAt).map(safeConversation);

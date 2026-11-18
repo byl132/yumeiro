@@ -197,6 +197,12 @@ say "  运行在隔离容器里（非 root、无额外权限、限制内存/CPU�
 say "  首次构建会下载这三个命令行工具，约需 1.5GB 磁盘；之后可用 ./install.sh --reconfigure 再添加。"
 ask RUNNER "安装智能体运行器？(y/N)" "n" YUMEIRO_RUNNER
 [[ "$RUNNER" =~ ^[Yy] ]] && PROFILE_FILES="$PROFILE_FILES:docker-compose.runner.yml"
+if [[ "$RUNNER" =~ ^[Yy] ]]; then
+  say "  代码沙箱（可选）：让智能体和网页里的「运行」按钮能执行 Python / Node / Bash。"
+  say "  跑在单独的断网容器里：没有外网、不挂载任何卷、不带密钥，只能看到当前工作区的文件副本。"
+  ask SANDBOX "同时安装代码沙箱？(y/N)" "n" YUMEIRO_SANDBOX
+  [[ "$SANDBOX" =~ ^[Yy] ]] && PROFILE_FILES="$PROFILE_FILES:docker-compose.sandbox.yml"
+fi
 
 # ---------- 5b. Cindy 桌面端（可选）----------
 say

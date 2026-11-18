@@ -116,3 +116,79 @@ export async function runCollaboration({ task, mode, participants, rounds = 2, m
   emit({ type: 'done', status, final });
   return { status, final, steps };
 }
+
+// ---------- 产品经理带队：用户只和产品经理说话，产品经理按每位成员的身份和擅长分配任务 ----------
+export const PM_LIMITS = { members: 12, rounds: 6, parallel: 4 };
+const clipText = (text, max) => text.length > max ? '…（更早的记录已省略）\n' + text.slice(text.length - max) : text;
+export const renderTranscript = items => clipText(items.map(item => `【${item.label}】\n${item.text}`).join('\n\n'), LIMITS.contextChars);
+export const rosterLine = m => `- ${m.label}${m.role ? `（身份：${m.role}）` : ''}｜擅长：${m.strengths || '通用'}${m.modelName ? `｜模型：${m.modelName}` : ''}`;
+
+// 容错解析产品经理的 JSON：{say, assign:[{to,task}]} 或 {say, final}
+export function parsePmDecision(text) {
+  const raw = String(text || '');
+  const candidates = [raw, ...(raw.match(/```(?:json)?\s*([\s\S]*?)```/g) || []).map(b => b.replace(/```(?:json)?|```/g, '')), raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1)];
+  for (const candidate of candidates) {
+    try {
+      const v = JSON.parse(candidate.trim());
+      if (!v || typeof v !== 'object') continue;
+      const assign = Array.isArray(v.assign) ? v.assign.map(a => ({ to: String(a?.to || '').trim(), task: String(a?.task || '').trim() })).filter(a => a.to && a.task) : [];
+      const final = v.final === undefined || v.final === null ? '' : String(v.final);
+      if (assign.length || final.trim()) return { say: String(v.say || '').trim(), assign, final };
+    } catch { /* 试下一个 */ }
+  }
+  return null;
+}
+
+export function pmPrompt({ pm, members, history, remaining, forceFinal }) {
+  return `你是团队的产品经理（名称：${pm.label}），在群里辅助用户。你自己不做具体产出，而是根据每位成员的身份和擅长，把任务拆开分配给最合适的人，最后把成员的成果整合成给用户的答复。\n\n团队成员：\n${members.map(rosterLine).join('\n')}\n\n群聊记录：\n${history}\n\n` +
+    (forceFinal ? '现在不能再分配任务了，请基于已有成果给用户最终答复。只输出 JSON：{"say":"","final":"答复内容"}'
+      : `请只输出一个 JSON 对象（不要多余文字），二选一：\n1) 分配任务：{"say":"一句话告诉用户你打算怎么分工、为什么选这些人","assign":[{"to":"成员名称","task":"具体要做什么、交付什么"}]}。互相独立的任务可以同时分给多人（一次最多 ${PM_LIMITS.parallel} 人）。\n2) 答复或追问：{"say":"","final":"给用户的答复；信息不够时在这里向用户提问"}\n选人要看擅长：写代码给擅长代码的，推理分析给擅长推理的，写文案给擅长文字的。简单问题可直接 final。最多还能分配 ${remaining} 轮。`);
+}
+export function workerPrompt({ pm, member, task, history }) {
+  return `你是团队成员「${member.label}」。${member.role ? `你的身份：${member.role}。` : ''}${member.strengths ? `你擅长：${member.strengths}。` : ''}\n产品经理（${pm.label}）分配给你的任务：\n${task}\n\n群聊记录：\n${history}\n\n请直接给出交付内容，不要复述任务。`;
+}
+
+// pm / members：{label, role, strengths, modelName?, ...} 由调用方注入真正的发言函数 call({participant, prompt, onDelta, signal}) → {text}
+// emit：turn_start{label} / delta{label,text} / turn_end{label,text}。history：此前的群聊记录 [{label,text}]
+export async function runPmTeam({ message, history = [], pm, members, call, emit = () => {}, signal, maxRounds = 4 }) {
+  if (!members.length) throw new Error('团队里还没有成员');
+  maxRounds = Math.min(Math.max(1, maxRounds), PM_LIMITS.rounds);
+  const log = [...history, { label: '用户', text: message }];
+  const byLabel = new Map(members.map(m => [m.label, m]));
+  const abortCheck = () => { if (signal?.aborted) throw Object.assign(new Error('已停止'), { aborted: true }); };
+  const say = (label, text) => { emit({ type: 'turn_start', label }); emit({ type: 'delta', label, text }); emit({ type: 'turn_end', label, text }); log.push({ label, text }); };
+  const decide = async (forceFinal, remaining) => {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      abortCheck();
+      const out = await call({ participant: pm, prompt: pmPrompt({ pm, members, history: renderTranscript(log), remaining, forceFinal }) + (attempt ? '\n\n注意：上一次的输出不是合法 JSON，请只输出 JSON 对象。' : ''), onDelta: () => {}, signal });
+      const decision = parsePmDecision(out.text);
+      if (decision) return decision;
+      if (attempt && String(out.text).trim()) return { say: '', assign: [], final: String(out.text).trim() }; // 实在不是 JSON：把原文当答复
+    }
+    return { say: '', assign: [], final: '（产品经理没有给出有效的答复）' };
+  };
+  let status = 'completed';
+  for (let round = 1; ; round++) {
+    const forceFinal = round > maxRounds;
+    const decision = await decide(forceFinal, maxRounds - round + 1);
+    if (decision.say && (decision.assign.length || decision.final)) say(pm.label, decision.say);
+    if (forceFinal || !decision.assign.length) { if (decision.final.trim()) say(pm.label, decision.final); else if (!decision.say) say(pm.label, '（没有可汇报的内容）'); if (forceFinal && decision.assign.length) status = 'round_limit'; break; }
+    const jobs = [], unknown = [], seen = new Set();
+    for (const a of decision.assign.slice(0, PM_LIMITS.parallel)) {
+      const member = byLabel.get(a.to);
+      if (!member) unknown.push(a.to); else if (!seen.has(a.to)) { seen.add(a.to); jobs.push({ member, task: a.task }); }
+    }
+    if (unknown.length) log.push({ label: pm.label, text: `（我点了不存在的成员：${unknown.join('、')}，需从名单中选择。）` });
+    const snapshot = renderTranscript(log);
+    const results = await Promise.all(jobs.map(async ({ member, task }) => {
+      abortCheck();
+      emit({ type: 'turn_start', label: member.label, task });
+      const out = await call({ participant: member, prompt: workerPrompt({ pm, member, task, history: snapshot }), onDelta: text => emit({ type: 'delta', label: member.label, text }), signal });
+      emit({ type: 'turn_end', label: member.label, text: out.text });
+      return { label: member.label, text: String(out.text || '').slice(0, LIMITS.stepChars) };
+    }));
+    for (const r of results) log.push(r);
+  }
+  emit({ type: 'done', status });
+  return { status };
+}

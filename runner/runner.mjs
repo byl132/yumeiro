@@ -6,9 +6,10 @@ import { spawn, execFile } from 'node:child_process';
 import { timingSafeEqual, randomBytes } from 'node:crypto';
 import { mkdir, readdir, readFile, writeFile, rm, stat, realpath, lstat } from 'node:fs/promises';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 import { createReadStream } from 'node:fs';
 import { walkFiles, snapshotFile, snapshotWorkspace, listVersions, history, readVersion, restoreVersion, deleteWithBackup } from './filestore.mjs';
+import { runWithFiles, mintExecToken, verifyExecToken, LANGUAGES, SANDBOX_LIMITS, SYNC_LIMITS } from './sandbox.mjs';
 import { sanitizeMcp, claudeMcp, codexMcp, sanitizeGateway, codexGateway, anthropicBase, piAgentFiles, GW_PROVIDER, GW_KEY_ENV } from './mcp.mjs';
 
 export const ENGINES = ['claude', 'codex', 'pi'];
@@ -21,9 +22,10 @@ export function engineCommand(engine, env = process.env) {
   return splitCmd(configured || engine);
 }
 
-// 构造命令行。mode：readonly 只读；edit 可以读写工作区文件，但任何引擎都不开放任意 shell 命令。
+// 构造命令行。mode：readonly 只读；edit 可以读写工作区文件；exec 在 edit 的基础上多一个 sandbox_run 工具（代码在断网的沙箱容器里跑）。
+// 任何模式下，引擎自己的 shell / Bash 工具都不开放。
 export function buildInvocation(engine, { prompt, mode, model, system, provider, dir, mcp = [], gateway = null, env = process.env }) {
-  const edit = mode === 'edit';
+  const edit = mode === 'edit' || mode === 'exec';
   if (engine === 'claude') {
     const cm = claudeMcp(mcp), allowed = edit ? cm.tools : ['Read', 'Grep', 'Glob', ...cm.tools];
     const args = ['-p', prompt, '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
@@ -96,6 +98,11 @@ function authorized(req, token) {
   const wanted = Buffer.from(token);
   return given.length === wanted.length && timingSafeEqual(given, wanted);
 }
+// /exec 额外接受“只能在某个工作区跑代码”的短期令牌（给智能体的 MCP 进程用）；返回令牌绑定的工作区，完整令牌返回 true
+function execAuth(req, token) {
+  if (authorized(req, token)) return true;
+  return verifyExecToken(token, String(req.headers.authorization || '').replace(/^Bearer\s+/i, ''))?.workspace || false;
+}
 const readBody = (req, limit) => new Promise((resolve, reject) => {
   const chunks = []; let size = 0;
   req.on('data', chunk => { size += chunk.length; if (size > limit) { reject(Object.assign(new Error('请求过大'), { status: 413 })); req.destroy(); } else chunks.push(chunk); });
@@ -123,11 +130,13 @@ export function createRunner({ token, root, env = process.env, log = () => {} })
     const engine = String(body.engine || ''), prompt = String(body.prompt || '');
     if (!ENGINES.includes(engine)) return json(res, 400, { error: '未知引擎' });
     if (!prompt.trim() || prompt.length > 200000) return json(res, 400, { error: 'prompt 为空或过长' });
-    const mode = body.mode === 'edit' ? 'edit' : 'readonly';
+    const mode = body.mode === 'edit' || body.mode === 'exec' ? body.mode : 'readonly';
+    const sandboxUrl = String(env.SANDBOX_URL || '').replace(/\/+$/, '');
+    if (mode === 'exec' && !sandboxUrl) return json(res, 400, { error: '运行器没有配置沙箱（SANDBOX_URL），不能使用“可运行代码”模式' });
     if (running >= maxConcurrent) return json(res, 429, { error: '运行器繁忙，请稍后再试' });
     let dir; try { dir = (await resolveInWorkspace(root, String(body.workspace || ''), '', { mustExist: false })).real; } catch (error) { return json(res, error.status || 400, { error: error.message }); }
 
-    const editing = mode === 'edit', workspaceId = String(body.workspace);
+    const editing = mode !== 'readonly', workspaceId = String(body.workspace);
     // 智能体动手改文件之前先存一版；结束后再存一版。相同内容不会重复存。
     if (editing) await snapshotWorkspace(root, workspaceId, dir).catch(error => log('运行前备份失败：' + error.message));
     const childEnv = { PATH: env.PATH, HOME: path.join(root, '.home', engine), LANG: 'C.UTF-8', CI: '1', NO_COLOR: '1', TERM: 'dumb' };
@@ -135,6 +144,9 @@ export function createRunner({ token, root, env = process.env, log = () => {} })
     await mkdir(childEnv.HOME, { recursive: true });
 
     let mcpList, gateway; try { mcpList = sanitizeMcp(body.mcp, env); gateway = sanitizeGateway(body.gateway); } catch (error) { return json(res, error.status || 400, { error: error.message }); }
+    if (mode === 'exec') { // 沙箱 MCP：只带一个到期很快、只对本工作区有效的令牌，不带运行器令牌
+      mcpList = [...mcpList, { name: 'sandbox', command: process.execPath, args: [path.join(path.dirname(fileURLToPath(import.meta.url)), 'sandbox-mcp.mjs')], env: { SANDBOX_URL: String(env.RUNNER_SELF_URL || 'http://127.0.0.1:' + (env.PORT || 8790)).replace(/\/+$/, ''), SANDBOX_WORKSPACE: workspaceId, SANDBOX_TOKEN: mintExecToken(token, workspaceId, Math.ceil(Number(body.timeoutSec || defaultTimeout) + 120)) } }];
+    }
     const invocation = buildInvocation(engine, { prompt, mode, model: body.model ? String(body.model).slice(0, 200) : '', system: body.system ? String(body.system).slice(0, 8000) : '', provider: body.provider ? String(body.provider).slice(0, 60) : '', dir, mcp: mcpList, gateway, env });
     // 网关模型：Claude Code 用 Anthropic 环境变量；Codex 的服务商在命令行里；Pi 在单独的配置目录里写 models.json / mcp.json
     let piDir = '';
@@ -192,14 +204,92 @@ export function createRunner({ token, root, env = process.env, log = () => {} })
     child.on('error', error => { send({ type: 'end', status: 'failed', error: '无法启动 ' + engine + '：' + error.message }); res.end(); });
   }
 
+  // ---- 沙箱 ----
+  // 两种角色，由 SANDBOX_ONLY 决定：
+  //  · 沙箱容器（SANDBOX_ONLY=1）：不挂载任何卷、不能上外网，只提供 POST /sandbox/run —— 收到一份工作区文件副本，跑完把改动送回去；
+  //  · 运行器（默认）：POST /exec 把工作区的文件打包发给沙箱（SANDBOX_URL），再把改动写回工作区（写回前后各存一版）。
+  const maxExec = Number(env.SANDBOX_MAX_CONCURRENT) || 4;
+  const syncLimits = { ...SYNC_LIMITS, maxTotalBytes: (Number(env.SANDBOX_MAX_SYNC_MB) || 20) * 1048576 };
+  const sandboxLimits = { ...SANDBOX_LIMITS, ...(Number(env.SANDBOX_MAX_TIMEOUT_SEC) ? { maxTimeoutSec: Number(env.SANDBOX_MAX_TIMEOUT_SEC) } : {}) };
+  let execRunning = 0;
+  async function handleSandboxRun(req, res) {
+    let body; try { body = JSON.parse((await readBody(req, syncLimits.maxTotalBytes * 2 + 1024 * 1024)).toString('utf8')); } catch (error) { return json(res, error.status || 400, { error: '请求格式无效' }); }
+    if (execRunning >= maxExec) return json(res, 429, { error: '沙箱繁忙，请稍后再试' });
+    execRunning++;
+    try {
+      return json(res, 200, await runWithFiles({ files: body.files, language: body.language, code: body.code, command: body.command, timeoutSec: body.timeoutSec, maxOutputBytes: Number(env.SANDBOX_MAX_OUTPUT_KB) ? Number(env.SANDBOX_MAX_OUTPUT_KB) * 1024 : undefined, env, limits: sandboxLimits, sync: syncLimits }));
+    } catch (error) { return json(res, error.status || 500, { error: error.status ? error.message : '沙箱执行失败' }); }
+    finally { execRunning--; }
+  }
+  async function handleExec(req, res, auth) {
+    const sandboxUrl = String(env.SANDBOX_URL || '').replace(/\/+$/, '');
+    if (!sandboxUrl) return json(res, 403, { error: '没有配置沙箱（SANDBOX_URL）。请按 docker-compose.sandbox.yml 部署沙箱容器' });
+    let body; try { body = JSON.parse((await readBody(req, 512 * 1024)).toString('utf8')); } catch (error) { return json(res, error.status || 400, { error: '请求格式无效' }); }
+    const workspaceId = String(body.workspace || '');
+    if (auth !== true && auth !== workspaceId) return json(res, 403, { error: '这个令牌不能用于该工作区' });
+    if (execRunning >= maxExec) return json(res, 429, { error: '沙箱繁忙，请稍后再试' });
+    let real; try { real = (await resolveInWorkspace(root, workspaceId, '', { mustExist: false })).real; } catch (error) { return json(res, error.status || 400, { error: error.message }); }
+    execRunning++;
+    try {
+      // 1) 打包工作区文件（跳过 node_modules / .git；超过上限就明确拒绝，不静默漏文件）
+      const tree = await walkFiles(real, { max: syncLimits.maxFiles + 1 });
+      if (tree.truncated || tree.files.length > syncLimits.maxFiles) return json(res, 413, { error: '工作区文件太多（超过 ' + syncLimits.maxFiles + ' 个），沙箱放不下' });
+      const bytes = tree.files.reduce((sum, file) => sum + file.size, 0);
+      if (bytes > syncLimits.maxTotalBytes) return json(res, 413, { error: '工作区文件太大（' + (bytes / 1048576).toFixed(1) + ' MB），沙箱最多接收 ' + Math.round(syncLimits.maxTotalBytes / 1048576) + ' MB' });
+      const files = [];
+      for (const file of tree.files) files.push({ path: file.path, data: (await readFile(path.join(real, ...file.path.split('/')))).toString('base64') });
+      // 2) 交给沙箱
+      const timeoutSec = Math.min(Math.max(Number(body.timeoutSec) || sandboxLimits.timeoutSec, 1), sandboxLimits.maxTimeoutSec);
+      let response;
+      try {
+        response = await fetch(sandboxUrl + '/sandbox/run', { method: 'POST', redirect: 'error', signal: AbortSignal.timeout((timeoutSec + 30) * 1000), headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ files, language: body.language, code: body.code, command: body.command, timeoutSec }) });
+      } catch { return json(res, 502, { error: '无法连接沙箱' }); }
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) return json(res, response.status === 429 ? 429 : response.status === 400 || response.status === 413 ? response.status : 502, { error: result.error || '沙箱返回 HTTP ' + response.status });
+      // 3) 把改动写回工作区（先备份；每个路径都过一遍工作区路径检查，防止符号链接/越界）
+      const changed = [], removed = [];
+      if ((result.written || []).length || (result.deleted || []).length) {
+        await snapshotWorkspace(root, workspaceId, real).catch(error => log('沙箱写回前备份失败：' + error.message));
+        for (const item of result.written || []) {
+          const { target } = await resolveInWorkspace(root, workspaceId, String(item.path || ''), { mustExist: false }).catch(() => ({}));
+          if (!target) continue;
+          await mkdir(path.dirname(target), { recursive: true });
+          await writeFile(target, Buffer.from(String(item.data || ''), 'base64'));
+          changed.push(item.path);
+        }
+        for (const rel of result.deleted || []) {
+          const { target } = await resolveInWorkspace(root, workspaceId, String(rel || ''), { mustExist: false }).catch(() => ({}));
+          if (!target) continue;
+          await rm(target, { force: true }); removed.push(rel);
+        }
+        await snapshotWorkspace(root, workspaceId, real).catch(error => log('沙箱写回后备份失败：' + error.message));
+      }
+      const { written, deleted, ...rest } = result;
+      return json(res, 200, { ...rest, changed, removed });
+    } catch (error) {
+      return json(res, error.status || 500, { error: error.status ? error.message : '沙箱执行失败' });
+    } finally { execRunning--; }
+  }
+
   return http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://x');
-      if (!authorized(req, token)) return json(res, 401, { error: '未授权' });
+      const auth = url.pathname === '/exec' && req.method === 'POST' ? execAuth(req, token) : authorized(req, token);
+      if (!auth) return json(res, 401, { error: '未授权' });
+      const sandboxOnly = env.SANDBOX_ONLY === '1';
+      // 沙箱容器只提供 /sandbox/run 和 /health；运行器不提供 /sandbox/run
+      if (req.method === 'POST' && url.pathname === '/sandbox/run' && sandboxOnly) return await handleSandboxRun(req, res);
+      if (sandboxOnly && !(req.method === 'GET' && url.pathname === '/health')) return json(res, 404, { error: '未找到' });
+      if (req.method === 'POST' && url.pathname === '/exec') return await handleExec(req, res, auth);
       if (req.method === 'GET' && url.pathname === '/health') {
+        if (sandboxOnly) {
+          const languages = {};
+          for (const [name, spec] of Object.entries(LANGUAGES)) languages[name] = { label: spec.label, installed: await (toolVersions['lang:' + name] ??= probeTool(spec.cmd[0])) };
+          return json(res, 200, { ok: true, sandbox: true, running: execRunning, maxConcurrent: maxExec, languages });
+        }
         const engines = {};
         for (const engine of ENGINES) { versions[engine] ??= await probe(engine); engines[engine] = { installed: Boolean(versions[engine]), version: versions[engine] }; }
-        return json(res, 200, { ok: true, running, maxConcurrent, engines, tools: { npx: (toolVersions.npx ??= await probeTool('npx')), uvx: (toolVersions.uvx ??= await probeTool('uvx')) } });
+        return json(res, 200, { ok: true, running, maxConcurrent, engines, sandboxConfigured: Boolean(env.SANDBOX_URL), tools: { npx: (toolVersions.npx ??= await probeTool('npx')), uvx: (toolVersions.uvx ??= await probeTool('uvx')) } });
       }
       if (req.method === 'POST' && url.pathname === '/run') return await handleRun(req, res);
 
