@@ -108,7 +108,7 @@ async function listTree(base) {
       const rel = prefix ? prefix + '/' + name : name;
       if (info.isDirectory()) await walk(full, rel);
       else if (info.isFile()) out.push({ path: rel, full, size: info.size });
-      if (out.length > 20000) return;
+      if (out.length > 20000) { out.truncated = true; return; }
     }
   }
   await walk(base, '');
@@ -144,7 +144,8 @@ export async function runWithFiles({ files = [], language, code, command, timeou
       if (outBytes > sync.maxTotalBytes || written.length >= sync.maxFiles) { truncated = true; continue; }
       written.push({ path: item.path, data: data.toString('base64') });
     }
-    for (const rel of before.keys()) if (!seen.has(rel)) deleted.push(rel);
+    if (!after.truncated) for (const rel of before.keys()) if (!seen.has(rel)) deleted.push(rel); // 文件太多没列全时不判定删除，免得误删
+    else truncated = true;
     return { ...result, written, deleted, changesTruncated: truncated };
   } finally { await rm(top, { recursive: true, force: true }).catch(() => {}); }
 }

@@ -116,6 +116,9 @@ fun AppRoot(vm: AppViewModel) {
                 Screen.Market -> MarketScreen(vm)
                 Screen.Admin -> AdminScreen(vm)
                 Screen.Security -> SecurityScreen(vm)
+                Screen.Groups -> GroupsScreen(vm)
+                Screen.GroupChat -> GroupChatScreen(vm)
+                Screen.GroupEdit -> GroupEditScreen(vm)
             }
             if (vm.toast.isNotEmpty()) {
                 LaunchedEffect(vm.toast) { kotlinx.coroutines.delay(3200); vm.toast = "" }
@@ -160,7 +163,7 @@ fun ChatScreen(vm: AppViewModel) {
     ModalNavigationDrawer(drawerState = drawer, drawerContent = {
         ModalDrawerSheet(drawerContainerColor = DrawerBg, modifier = Modifier.widthIn(max = 320.dp)) {
             Sidebar(vm, onPick = { id -> scope.launch { drawer.close() }; vm.openConv(id) }, onNew = { scope.launch { drawer.close() }; vm.newChat() }, onDelete = { deleting = it },
-                onSettings = { scope.launch { drawer.close() }; vm.openSettings() })
+                onSettings = { scope.launch { drawer.close() }; vm.openSettings() }, onGroups = { scope.launch { drawer.close() }; vm.open(Screen.Groups) })
         }
     }) {
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
@@ -177,9 +180,11 @@ fun ChatScreen(vm: AppViewModel) {
 }
 
 @Composable
-private fun Sidebar(vm: AppViewModel, onPick: (String) -> Unit, onNew: () -> Unit, onDelete: (Conv) -> Unit, onSettings: () -> Unit) {
+private fun Sidebar(vm: AppViewModel, onPick: (String) -> Unit, onNew: () -> Unit, onDelete: (Conv) -> Unit, onSettings: () -> Unit, onGroups: () -> Unit) {
     Column(Modifier.fillMaxHeight().statusBarsPadding().padding(12.dp)) {
         Button(onClick = onNew, modifier = Modifier.fillMaxWidth().height(46.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Soft, contentColor = Ink)) { Icon(Icons.Default.Add, null); Spacer(Modifier.size(8.dp)); Text("新建对话") }
+        Spacer(Modifier.height(6.dp))
+        OutlinedButton(onClick = onGroups, modifier = Modifier.fillMaxWidth().height(44.dp), shape = RoundedCornerShape(14.dp)) { Text("👥 群聊（多智能体）", color = Ink) }
         Spacer(Modifier.height(8.dp))
         LazyColumn(Modifier.weight(1f)) {
             for ((label, list) in vm.grouped()) {

@@ -48,11 +48,12 @@ class Pending(val name: String, val image: Boolean, val size: Long, val thumb: B
     val done get() = id.isNotEmpty()
 }
 
-enum class Screen { Loading, Login, Chat, Settings, Agents, Skills, Market, Admin, Security }
+enum class Screen { Loading, Login, Chat, Settings, Agents, Skills, Market, Admin, Security, Groups, GroupChat, GroupEdit }
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     val session = Session(app)
-    private val api = ApiClient(session)
+    internal val api = ApiClient(session)
+    val group = GroupState(this)
 
     var screen by mutableStateOf(Screen.Loading); private set
     var loginBusy by mutableStateOf(false); private set
@@ -100,7 +101,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun say(text: String) { toast = text }
 
-    private fun <T> io(block: () -> T, onError: (ApiException) -> Unit = { say(it.message ?: "出错了") }, onOk: (T) -> Unit = {}) {
+    internal fun <T> io(block: () -> T, onError: (ApiException) -> Unit = { say(it.message ?: "出错了") }, onOk: (T) -> Unit = {}) {
         viewModelScope.launch {
             try { val value = withContext(Dispatchers.IO) { block() }; onOk(value) }
             catch (e: ApiException) { if (e.status == 401) expired() else onError(e) }
@@ -108,6 +109,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun expiredPublic() = expired()
     private fun expired() { session.clearLogin(); passwordInput = ""; loginError = "登录已过期，请重新登录"; screen = Screen.Login }
 
     // ---- 登录 / 退出 ----
@@ -145,12 +147,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun logout() {
         stop()
-        viewModelScope.launch { withContext(Dispatchers.IO) { api.logout() }; convs.clear(); messages.clear(); pending.clear(); currentId = null; title = "新对话"; me = JSONObject(); org.yumeiro.app.ui.Pal.wallpaper = null; org.yumeiro.app.ui.Pal.gradient = null; screen = Screen.Login }
+        viewModelScope.launch { withContext(Dispatchers.IO) { api.logout() }; convs.clear(); messages.clear(); group.groups.clear(); group.messages.clear(); group.current = null; pending.clear(); currentId = null; title = "新对话"; me = JSONObject(); org.yumeiro.app.ui.Pal.wallpaper = null; org.yumeiro.app.ui.Pal.gradient = null; screen = Screen.Login }
     }
 
     private fun enterApp() {
         screen = Screen.Chat
-        loadConvs(); loadModels(); loadConfig(); loadUsage(); loadAgents(); loadMemories(); loadWallpaperPrefs()
+        loadConvs(); loadModels(); loadConfig(); loadUsage(); loadAgents(); loadMemories(); loadWallpaperPrefs(); group.load()
     }
 
     // ---- 数据 ----

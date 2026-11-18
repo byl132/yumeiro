@@ -28,21 +28,22 @@
   function attachRunners(bubble) {
     if (!sandboxOk || !bubble) return;
     const text = bubble.textContent || '';
-    if (bubble.dataset.runText === text) return;
-    bubble.dataset.runText = text;
+    if (bubble.dataset.running === '1' || bubble.dataset.runText === text.trim()) return;
+    bubble.dataset.runText = text.trim();
     bubble.parentElement.querySelector(':scope > .run-bar')?.remove();
     const blocks = runnersFor(text);
     if (!blocks.length) return;
     const output = el('pre', { style: 'white-space:pre-wrap;margin:6px 0 0;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:12px;max-height:240px;overflow:auto', hidden: true });
-    const bar = el('div', { className: 'run-bar', style: 'display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px' },
+    const bar = el('div', { className: 'run-bar', style: 'display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px;flex:0 0 100%;box-sizing:border-box;padding-left:var(--run-indent,0)' },
       blocks.map((b, i) => el('button', { type: 'button', className: 'secondary', style: 'height:28px;padding:0 10px;font-size:12px', textContent: `▶ 在沙箱运行第 ${i + 1} 段（${b.lang}）`, on: { click: async ev => {
-        const btn = ev.currentTarget; btn.disabled = true; output.hidden = false; output.textContent = '运行中…';
+        const btn = ev.currentTarget; btn.disabled = true; bubble.dataset.running = '1'; output.hidden = false; output.textContent = '运行中…';
         try {
           const r = await api('/api/sandbox/run', { method: 'POST', body: JSON.stringify({ language: b.lang, code: b.code }) });
           output.textContent = `退出码 ${r.exitCode ?? '无'}${r.timedOut ? '（超时被终止）' : ''} · ${r.durationMs} ms\n` + (r.stdout ? r.stdout : '') + (r.stderr ? '\n[stderr]\n' + r.stderr : '') + (r.changed?.length ? '\n[写入工作区文件] ' + r.changed.join(', ') : '');
-        } catch (x) { output.textContent = '运行失败：' + x.message; } finally { btn.disabled = false; }
+        } catch (x) { output.textContent = '运行失败：' + x.message; } finally { btn.disabled = false; delete bubble.dataset.running; }
       } } })), output);
-    bubble.after(bar);
+    const host = bubble.parentElement; if (host.classList.contains('message')) { host.style.flexWrap = 'wrap'; bar.style.setProperty('--run-indent', '44px'); }
+    host.append(bar);
   }
   const scanBubbles = () => document.querySelectorAll('#messages .message.assistant .bubble, #groupPanel .gmsg.agent .bubble').forEach(attachRunners);
 
@@ -52,7 +53,7 @@
   const safeName = text => String(text).replace(/[@\s/]+/g, '').slice(0, 20) || '模型';
 
   // ---------- 群聊面板 ----------
-  let groups = [], current = null, agents = [], busy = null, listBox, panel, msgBox, input, titleEl, sendBtn, stopBtn;
+  let groups = [], current = null, agents = [], busy = null, listBox, panel, msgBox, input, titleEl, sendBtn, stopBtn, chipsEl, statusEl;
   const labelColor = label => `hsl(${[...label].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7)} 55% 45%)`;
 
   function bubbleFor(message) {
@@ -64,6 +65,17 @@
     return { row, bubble };
   }
   const scrollDown = () => { msgBox.scrollTop = msgBox.scrollHeight; };
+  const setStatus = text => { if (statusEl) statusEl.textContent = text || ''; };
+  const TRY = { pm: ['帮我做一个产品需求文档（PRD）', '评估一下这个方案的风险，并给出改进建议', '帮我写一段文案，再检查代码实现是否可行'], chat: ['大家怎么看这个方案？', '@' + '成员名 先说说你的看法'], roundtable: ['讨论一下：先做 A 还是先做 B？'], pipeline: ['把这段需求拆成任务并逐步实现'], supervisor: ['完成这个任务：整理本周的工作要点'] };
+  function renderChips() {
+    chipsEl.replaceChildren(...(current ? current.members.map(m => el('button', { type: 'button', className: 'gchip', title: (m.role || '成员') + (m.strengths ? ' · 擅长：' + m.strengths : '') + '（点一下插入 @）', textContent: m.label + (m.role ? ' · ' + m.role : ''), style: 'border-color:' + labelColor(m.label), on: { click: () => { input.value += (input.value && !input.value.endsWith(' ') ? ' ' : '') + '@' + m.label + ' '; input.focus(); } } })) : []));
+  }
+  function renderEmpty() {
+    if (msgBox.children.length || !current) return;
+    const tries = TRY[current.mode] || [];
+    msgBox.append(el('div', { className: 'gempty' }, el('div', { textContent: current.mode === 'pm' ? '说出你的需求，' + (current.pm?.label || '产品经理') + '会按每位成员的擅长分工，再汇总答复你。' : '发一条消息开始，用 @名称 可以点名某位成员。' }),
+      el('div', { className: 'gtry' }, tries.map(t => el('button', { type: 'button', textContent: t, on: { click: () => { input.value = t; input.focus(); } } })))));
+  }
 
   async function loadList() {
     try { groups = (await api('/api/groups')).groups; } catch { groups = []; }
@@ -80,7 +92,8 @@
       current = data.group; panel.hidden = false; $('#app').classList.remove('menu-open');
       titleEl.textContent = current.title + ' · ' + current.members.map(m => m.label).join('、') + ' · ' + MODES[current.mode].split('（')[0];
       msgBox.replaceChildren(...data.messages.map(m => bubbleFor(m).row));
-      renderList(); scrollDown(); scanBubbles(); input.focus();
+      renderChips(); renderEmpty(); setStatus('');
+      renderList(); scrollDown(); scanBubbles(); if (!matchMedia('(max-width:760px)').matches) input.focus();
     } catch (x) { alert(x.message); }
   }
   function closePanel() { panel.hidden = true; current = null; renderList(); }
@@ -88,7 +101,7 @@
   async function send() {
     const message = input.value.trim();
     if (!message || !current || busy) return;
-    input.value = ''; msgBox.append(bubbleFor({ role: 'user', content: message }).row); scrollDown();
+    input.value = ''; msgBox.querySelector('.gempty')?.remove(); msgBox.append(bubbleFor({ role: 'user', content: message }).row); scrollDown(); setStatus((current.pm?.label || '成员') + ' 正在思考…');
     busy = new AbortController(); sendBtn.hidden = true; stopBtn.hidden = false;
     let bubbles = new Map(), failure = '';
     try {
@@ -99,9 +112,9 @@
         let event = 'message', data = '';
         for (const line of block.split('\n')) { if (line.startsWith('event:')) event = line.slice(6).trim(); else if (line.startsWith('data:')) data += line.slice(5).trim(); }
         if (!data) return; const value = JSON.parse(data);
-        if (event === 'turn_start') { const b = bubbleFor({ role: 'agent', label: value.label, content: '…', task: value.task }); bubbles.set(value.label, { ...b, text: '' }); msgBox.append(b.row); scrollDown(); }
+        if (event === 'turn_start') { const b = bubbleFor({ role: 'agent', label: value.label, content: '…', task: value.task }); bubbles.set(value.label, { ...b, text: '' }); msgBox.append(b.row); scrollDown(); setStatus([...bubbles.keys()].join('、') + ' 正在发言…'); }
         else if (event === 'delta') { const b = bubbles.get(value.label); if (b) { b.text += value.text; b.bubble.textContent = b.text; scrollDown(); } }
-        else if (event === 'turn_end') { const b = bubbles.get(value.label); if (b) { attachRunners(b.bubble); bubbles.delete(value.label); } }
+        else if (event === 'turn_end') { const b = bubbles.get(value.label); if (b) { attachRunners(b.bubble); bubbles.delete(value.label); } setStatus(bubbles.size ? [...bubbles.keys()].join('、') + ' 正在发言…' : (current.mode === 'pm' ? current.pm?.label + ' 正在整理…' : '')); }
         else if (event === 'note') msgBox.append(el('div', { style: 'align-self:center;font-size:12px;color:var(--muted)', textContent: value.text }));
         else if (event === 'error') failure = value.error;
         else if (event === 'done') { current = value.group; loadList(); }
@@ -109,7 +122,7 @@
       for (;;) { const { done, value } = await reader.read(); if (done) break; buffer += decoder.decode(value, { stream: true }); let i; while ((i = buffer.indexOf('\n\n')) >= 0) { handle(buffer.slice(0, i)); buffer = buffer.slice(i + 2); } }
     } catch (x) { if (x.name !== 'AbortError') failure = x.message; }
     if (failure) msgBox.append(el('div', { className: 'bubble error', style: 'align-self:center', textContent: failure }));
-    busy = null; sendBtn.hidden = false; stopBtn.hidden = true; scrollDown();
+    busy = null; sendBtn.hidden = false; stopBtn.hidden = true; setStatus(''); scrollDown();
   }
 
   // 新建 / 编辑群聊
@@ -124,7 +137,7 @@
       const label = el('input', { placeholder: '名称', maxLength: 30, value: m?.label || '', style: 'width:100px' }), model = modelSelect(m?.model), agent = agentSelect(m?.agentId);
       const role = el('input', { placeholder: '身份，如“后端工程师”', maxLength: 200, value: m?.role || '', style: 'flex:1;min-width:130px' });
       const strengths = el('input', { placeholder: '擅长，如“写代码、排错”（产品经理据此分工）', maxLength: 200, value: m?.strengths || '', style: 'flex:2;min-width:180px' });
-      const row = el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;padding:8px;border:1px solid var(--line);border-radius:10px' }, label, model, agent, role, strengths, el('button', { type: 'button', className: 'secondary', textContent: '移除', on: { click: () => row.remove() } }));
+      const row = el('div', { className: 'gedit-row' }, label, model, agent, role, strengths, el('button', { type: 'button', className: 'secondary', textContent: '移除', on: { click: () => row.remove() } }));
       model.addEventListener('change', () => { // 换模型时，身份/擅长还是空的就按新模型填默认值
         const info = models.find(x => x.ref === model.value); if (!info) return;
         const h = hintFor(info.model + ' ' + (info.label || ''));
@@ -150,12 +163,12 @@
     const mode = el('select', {}, Object.entries(MODES).map(([v, t]) => el('option', { value: v, textContent: t }))); mode.value = group?.mode || 'pm';
     const rounds = el('input', { type: 'number', min: 1, max: 6, value: group?.rounds || (mode.value === 'pm' ? 4 : 2), style: 'width:70px' });
     const pmLabel = el('input', { maxLength: 30, value: group?.pm?.label || '产品经理', style: 'width:110px' }), pmModel = modelSelect(group?.pm?.model), pmAgent = agentSelect(group?.pm?.agentId);
-    const pmBox = el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:8px;border:1px dashed var(--line);border-radius:10px' }, el('strong', { textContent: '产品经理' }), pmLabel, pmModel, pmAgent, el('span', { style: 'font-size:12px;color:var(--muted)', textContent: '建议选最强的推理模型' }));
+    const pmBox = el('div', { className: 'gedit-row', style: 'align-items:center;border-style:dashed' }, el('strong', { textContent: '产品经理' }), pmLabel, pmModel, pmAgent, el('span', { style: 'font-size:12px;color:var(--muted)', textContent: '建议选最强的推理模型' }));
     const syncMode = () => { pmBox.hidden = mode.value !== 'pm'; };
     mode.addEventListener('change', syncMode); syncMode();
     const err = el('div', { style: 'color:#d33;font-size:13px' });
-    const dialog = el('div', { style: 'position:fixed;inset:0;background:#0006;z-index:50;display:grid;place-items:center;padding:16px' },
-      el('div', { className: 'modal', style: 'background:var(--bg,#fff);color:var(--ink);border-radius:14px;padding:18px;width:min(760px,100%);max-height:90vh;overflow:auto;display:grid;gap:10px' },
+    const dialog = el('div', { className: 'gedit-wrap' },
+      el('div', { className: 'modal', style: 'color:var(--ink);border-radius:14px;padding:18px;width:min(760px,100%);max-height:90vh;overflow:auto;display:grid;gap:10px' },
         el('h3', { style: 'margin:0', textContent: group ? '群聊设置' : '新建群聊' }), title,
         el('label', {}, '方式 ', mode), pmBox,
         el('div', { style: 'font-size:12px;color:var(--muted)', textContent: '成员：每个模型一个身份（名称 + 身份 + 擅长）。产品经理会根据“擅长”把任务分给最合适的人。身份和擅长是按模型名给的默认建议，你可以随意修改。' }), rows,
@@ -175,6 +188,32 @@
     document.body.append(dialog);
   }
 
+  document.head.append(el('style', { textContent: `
+#groupPanel{background:#f7f7f9;color:var(--ink)}html[data-theme=dark] #groupPanel{background:#0f1117}
+#groupPanel textarea,#groupPanel .bubble{background:#fff;color:#252832}
+html[data-theme=dark] #groupPanel textarea,html[data-theme=dark] #groupPanel .bubble{background:#171a23;color:var(--ink)}
+#groupPanel .bubble.error{background:#fff1f2;color:#9d3842;border:1px solid #f0c2c7}
+html[data-theme=dark] #groupPanel .bubble.error{background:#2a1a1e;color:#ffb4bd;border-color:#5b2a33}
+#groupPanel .gchips{display:flex;gap:6px;overflow-x:auto;padding:8px 14px;border-bottom:1px solid var(--line);scrollbar-width:none}
+#groupPanel .gchip{flex:none;border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:12px;background:transparent;color:var(--ink);cursor:pointer}
+#groupPanel .gstatus{padding:4px 16px;font-size:12px;color:var(--muted);min-height:22px}
+#groupPanel .gempty{margin:auto;max-width:520px;padding:24px;text-align:center;color:var(--muted);display:grid;gap:10px}
+#groupPanel .gtry{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+#groupPanel .gtry button{border:1px solid var(--line);border-radius:12px;background:transparent;color:var(--ink);padding:6px 10px;font-size:13px;cursor:pointer}
+#groupPanel .gcomposer{display:flex;gap:8px;padding:10px 14px calc(10px + env(safe-area-inset-bottom));border-top:1px solid var(--line)}
+#groupPanel .gmsg{max-width:88%}
+.gedit-wrap *{box-sizing:border-box}.gedit-wrap .modal>*{min-width:0}.gedit-wrap select,.gedit-wrap input{max-width:100%}
+.gedit-row{display:flex;gap:6px;flex-wrap:wrap;padding:8px;border:1px solid var(--line);border-radius:10px}
+.gedit-wrap{position:fixed;inset:0;background:#0006;z-index:50;display:grid;place-items:center;padding:16px}
+@media(max-width:760px){
+  #groupPanel .gmsg{max-width:94%}
+  #groupPanel textarea,.gedit-wrap input,.gedit-wrap select{font-size:16px}
+  .gedit-wrap{padding:0;place-items:stretch}
+  .gedit-wrap .modal{width:100%!important;max-height:100vh!important;height:100%;border-radius:0!important}
+  .gedit-wrap .modal{overflow-x:hidden;padding:14px!important;box-sizing:border-box}
+  .gedit-row{flex-direction:column}
+  .gedit-row>*{width:100%!important;max-width:none!important;min-width:0!important;flex:none!important}
+}` }));
   function build() {
     const chatList = $('#chatList'); if (!chatList || $('#groupList')) return;
     listBox = el('div', { className: 'chat-list', id: 'groupList', style: 'max-height:28%;overflow:auto' });
@@ -185,11 +224,12 @@
     input = el('textarea', { rows: 2, placeholder: '说出你的需求（产品经理带队时由它分工，也可 @名称 点名）  Enter 发送，Shift+Enter 换行', style: 'flex:1;resize:none;border:1px solid var(--line);border-radius:10px;padding:8px', on: { keydown: e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } } } });
     sendBtn = el('button', { type: 'button', className: 'primary', textContent: '发送', style: 'height:40px;padding:0 16px', on: { click: send } });
     stopBtn = el('button', { type: 'button', className: 'secondary', textContent: '停止', hidden: true, style: 'height:40px;padding:0 16px', on: { click: () => busy?.abort() } });
-    panel = el('div', { id: 'groupPanel', hidden: true, style: 'position:absolute;inset:0;z-index:5;background:var(--bg,#f7f7f9);display:flex;flex-direction:column' },
+    chipsEl = el('div', { className: 'gchips' }); statusEl = el('div', { className: 'gstatus' });
+    panel = el('div', { id: 'groupPanel', hidden: true, style: 'position:absolute;inset:0;z-index:5;display:flex;flex-direction:column' },
       el('div', { style: 'display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line)' }, titleEl,
         el('button', { type: 'button', className: 'secondary', textContent: '设置', on: { click: () => current && editGroup(current) } }),
         el('button', { type: 'button', className: 'secondary', textContent: '关闭', on: { click: closePanel } })),
-      msgBox, el('div', { style: 'display:flex;gap:8px;padding:10px 14px;border-top:1px solid var(--line)' }, input, sendBtn, stopBtn));
+      chipsEl, msgBox, statusEl, el('div', { className: 'gcomposer' }, input, sendBtn, stopBtn));
     main.append(panel);
     loadList();
   }

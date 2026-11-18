@@ -161,6 +161,7 @@ export async function runPmTeam({ message, history = [], pm, members, call, emit
     for (let attempt = 0; attempt < 2; attempt++) {
       abortCheck();
       const out = await call({ participant: pm, prompt: pmPrompt({ pm, members, history: renderTranscript(log), remaining, forceFinal }) + (attempt ? '\n\n注意：上一次的输出不是合法 JSON，请只输出 JSON 对象。' : ''), onDelta: () => {}, signal });
+      if (out.aborted) throw Object.assign(new Error('已停止'), { aborted: true });
       const decision = parsePmDecision(out.text);
       if (decision) return decision;
       if (attempt && String(out.text).trim()) return { say: '', assign: [], final: String(out.text).trim() }; // 实在不是 JSON：把原文当答复
@@ -180,14 +181,23 @@ export async function runPmTeam({ message, history = [], pm, members, call, emit
     }
     if (unknown.length) log.push({ label: pm.label, text: `（我点了不存在的成员：${unknown.join('、')}，需从名单中选择。）` });
     const snapshot = renderTranscript(log);
+    // 一位成员出错（限流、网络、额度）不拖垮整轮：记成“失败”，让产品经理知道并决定怎么办
     const results = await Promise.all(jobs.map(async ({ member, task }) => {
       abortCheck();
       emit({ type: 'turn_start', label: member.label, task });
-      const out = await call({ participant: member, prompt: workerPrompt({ pm, member, task, history: snapshot }), onDelta: text => emit({ type: 'delta', label: member.label, text }), signal });
-      emit({ type: 'turn_end', label: member.label, text: out.text });
-      return { label: member.label, text: String(out.text || '').slice(0, LIMITS.stepChars) };
+      try {
+        const out = await call({ participant: member, prompt: workerPrompt({ pm, member, task, history: snapshot }), onDelta: text => emit({ type: 'delta', label: member.label, text }), signal });
+        emit({ type: 'turn_end', label: member.label, text: out.text, partial: Boolean(out.aborted) });
+        return { label: member.label, text: String(out.text || '').slice(0, LIMITS.stepChars), aborted: Boolean(out.aborted) };
+      } catch (error) {
+        if (error.aborted || signal?.aborted) throw error;
+        const text = '（执行失败：' + String(error.message || error).slice(0, 200) + '）';
+        emit({ type: 'delta', label: member.label, text }); emit({ type: 'turn_end', label: member.label, text, failed: true });
+        return { label: member.label, text };
+      }
     }));
-    for (const r of results) log.push(r);
+    for (const r of results) log.push({ label: r.label, text: r.text });
+    if (results.some(r => r.aborted)) throw Object.assign(new Error('已停止'), { aborted: true });
   }
   emit({ type: 'done', status });
   return { status };

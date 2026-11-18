@@ -110,7 +110,7 @@ const readBody = (req, limit) => new Promise((resolve, reject) => {
   req.on('error', reject);
 });
 
-export function createRunner({ token, root, env = process.env, log = () => {} }) {
+export function createRunner({ token, sandboxToken, root, env = process.env, log = () => {} }) {
   if (!token || token.length < 16) throw new Error('RUNNER_TOKEN 至少需要 16 个字符');
   const maxConcurrent = Number(env.RUNNER_MAX_CONCURRENT) || 3, defaultTimeout = Number(env.RUNNER_TIMEOUT_SEC) || 600, maxOutput = 2 * 1024 * 1024;
   let running = 0;
@@ -208,7 +208,7 @@ export function createRunner({ token, root, env = process.env, log = () => {} })
   // 两种角色，由 SANDBOX_ONLY 决定：
   //  · 沙箱容器（SANDBOX_ONLY=1）：不挂载任何卷、不能上外网，只提供 POST /sandbox/run —— 收到一份工作区文件副本，跑完把改动送回去；
   //  · 运行器（默认）：POST /exec 把工作区的文件打包发给沙箱（SANDBOX_URL），再把改动写回工作区（写回前后各存一版）。
-  const maxExec = Number(env.SANDBOX_MAX_CONCURRENT) || 4;
+  const maxExec = Number(env.SANDBOX_MAX_CONCURRENT) || 1; // 同一容器里的并发任务彼此不隔离（同一用户、同一 /tmp），默认一次只跑一个
   const syncLimits = { ...SYNC_LIMITS, maxTotalBytes: (Number(env.SANDBOX_MAX_SYNC_MB) || 20) * 1048576 };
   const sandboxLimits = { ...SANDBOX_LIMITS, ...(Number(env.SANDBOX_MAX_TIMEOUT_SEC) ? { maxTimeoutSec: Number(env.SANDBOX_MAX_TIMEOUT_SEC) } : {}) };
   let execRunning = 0;
@@ -228,11 +228,12 @@ export function createRunner({ token, root, env = process.env, log = () => {} })
     const workspaceId = String(body.workspace || '');
     if (auth !== true && auth !== workspaceId) return json(res, 403, { error: '这个令牌不能用于该工作区' });
     if (execRunning >= maxExec) return json(res, 429, { error: '沙箱繁忙，请稍后再试' });
-    let real; try { real = (await resolveInWorkspace(root, workspaceId, '', { mustExist: false })).real; } catch (error) { return json(res, error.status || 400, { error: error.message }); }
+    const ephemeral = body.ephemeral === true && auth === true; // 没有指定工作区：空目录里跑，不读也不写任何工作区文件
+    let real = ''; if (!ephemeral) { try { real = (await resolveInWorkspace(root, workspaceId, '', { mustExist: false })).real; } catch (error) { return json(res, error.status || 400, { error: error.message }); } }
     execRunning++;
     try {
       // 1) 打包工作区文件（跳过 node_modules / .git；超过上限就明确拒绝，不静默漏文件）
-      const tree = await walkFiles(real, { max: syncLimits.maxFiles + 1 });
+      const tree = ephemeral ? { files: [], truncated: false } : await walkFiles(real, { max: syncLimits.maxFiles + 1 });
       if (tree.truncated || tree.files.length > syncLimits.maxFiles) return json(res, 413, { error: '工作区文件太多（超过 ' + syncLimits.maxFiles + ' 个），沙箱放不下' });
       const bytes = tree.files.reduce((sum, file) => sum + file.size, 0);
       if (bytes > syncLimits.maxTotalBytes) return json(res, 413, { error: '工作区文件太大（' + (bytes / 1048576).toFixed(1) + ' MB），沙箱最多接收 ' + Math.round(syncLimits.maxTotalBytes / 1048576) + ' MB' });
@@ -242,13 +243,13 @@ export function createRunner({ token, root, env = process.env, log = () => {} })
       const timeoutSec = Math.min(Math.max(Number(body.timeoutSec) || sandboxLimits.timeoutSec, 1), sandboxLimits.maxTimeoutSec);
       let response;
       try {
-        response = await fetch(sandboxUrl + '/sandbox/run', { method: 'POST', redirect: 'error', signal: AbortSignal.timeout((timeoutSec + 30) * 1000), headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ files, language: body.language, code: body.code, command: body.command, timeoutSec }) });
+        response = await fetch(sandboxUrl + '/sandbox/run', { method: 'POST', redirect: 'error', signal: AbortSignal.timeout((timeoutSec + 30) * 1000), headers: { Authorization: 'Bearer ' + (sandboxToken || token), 'Content-Type': 'application/json' }, body: JSON.stringify({ files, language: body.language, code: body.code, command: body.command, timeoutSec }) });
       } catch { return json(res, 502, { error: '无法连接沙箱' }); }
       const result = await response.json().catch(() => ({}));
       if (!response.ok) return json(res, response.status === 429 ? 429 : response.status === 400 || response.status === 413 ? response.status : 502, { error: result.error || '沙箱返回 HTTP ' + response.status });
       // 3) 把改动写回工作区（先备份；每个路径都过一遍工作区路径检查，防止符号链接/越界）
       const changed = [], removed = [];
-      if ((result.written || []).length || (result.deleted || []).length) {
+      if (!ephemeral && ((result.written || []).length || (result.deleted || []).length)) {
         await snapshotWorkspace(root, workspaceId, real).catch(error => log('沙箱写回前备份失败：' + error.message));
         for (const item of result.written || []) {
           const { target } = await resolveInWorkspace(root, workspaceId, String(item.path || ''), { mustExist: false }).catch(() => ({}));
@@ -413,12 +414,19 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const root = process.env.WORKSPACES_DIR || '/workspaces';
   await mkdir(root, { recursive: true });
   const { readFile } = await import('node:fs/promises');
-  let token = process.env.RUNNER_TOKEN || '';
-  if (process.env.RUNNER_TOKEN_FILE) {
+  let token = process.env.SANDBOX_ONLY === '1' ? '' : process.env.RUNNER_TOKEN || '';
+  if (process.env.SANDBOX_ONLY !== '1' && process.env.RUNNER_TOKEN_FILE) {
     try { token = (await readFile(process.env.RUNNER_TOKEN_FILE, 'utf8')).trim(); }
     catch (error) { console.error(`无法读取 RUNNER_TOKEN_FILE（${process.env.RUNNER_TOKEN_FILE}）：${error.code || error.message}。请检查 secrets/runner_token 是否存在且对所有用户可读（chmod 644）。`); process.exit(1); }
   }
-  const server = createRunner({ token, root, log: message => console.error(message) });
+  let sandboxToken = process.env.SANDBOX_TOKEN || '';
+  if (process.env.SANDBOX_TOKEN_FILE) {
+    try { sandboxToken = (await readFile(process.env.SANDBOX_TOKEN_FILE, 'utf8')).trim(); }
+    catch (error) { console.error(`无法读取 SANDBOX_TOKEN_FILE（${process.env.SANDBOX_TOKEN_FILE}）：${error.code || error.message}`); process.exit(1); }
+  }
+  // 沙箱容器只认沙箱令牌，不持有运行器令牌（沙箱里跑的是不可信代码，不能让它拿到运行器的完整权限）
+  if (process.env.SANDBOX_ONLY === '1') { if (!sandboxToken) { console.error('沙箱容器需要 SANDBOX_TOKEN_FILE'); process.exit(1); } token = sandboxToken; }
+  const server = createRunner({ token, sandboxToken, root, log: message => console.error(message) });
   const port = Number(process.env.PORT || 8790);
   server.listen(port, process.env.HOST || '0.0.0.0', () => console.log('Yumeiro runner listening on :' + port));
   for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => { server.close(); setTimeout(() => process.exit(0), 500); });

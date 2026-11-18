@@ -828,7 +828,7 @@ const sandboxConfig=()=>({enabled:Boolean(db.settings.sandbox?.enabled),membersA
 const sandboxAllowed=user=>{const c=sandboxConfig();return runnerEnabled&&c.enabled&&(user.role==='admin'||c.membersAllowed)};
 const sandboxBusy=new Set();
 // ---- 多智能体群聊 ----
-const busyGroups=new Set();
+const busyGroups=new Set(),activeGroupRuns=new Map(),GROUP_MAX_MESSAGES=500;
 const GROUP_MODES=['pm','chat','roundtable','pipeline','supervisor'];
 const PM_DEFAULT_ROLE='产品经理：理解用户目标，按成员的身份和擅长拆解并分配任务，整合成果后答复用户。';
 const safeGroup=group=>({id:group.id,title:group.title,createdAt:group.createdAt,updatedAt:group.updatedAt,mode:group.mode,rounds:group.rounds,count:group.messages.length,pm:group.pm?{label:group.pm.label,agentId:group.pm.agentId||null,model:group.pm.model||null}:null,members:group.members.map(member=>({strengths:member.strengths||'',label:member.label,agentId:member.agentId||null,agentName:member.agentId?db.agents[member.agentId]?.name||'（智能体已删除）':null,model:member.model||null,role:member.role||''}))});
@@ -864,9 +864,12 @@ function renderGroupTranscript(messages){
   const text=messages.slice(-40).map(m=>'【'+(m.role==='user'?'用户':m.label)+'】\n'+m.content).join('\n\n');
   return text.length>GROUP_CONTEXT_CHARS?'…（更早的记录已省略）\n'+text.slice(text.length-GROUP_CONTEXT_CHARS):text;
 }
+// “@名称”要按边界匹配：@GPT2 不能同时点到 GPT（名称可能是中文，所以不用 ）
+const escapeRegExp=text=>text.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+const mentionsLabel=(text,label)=>new RegExp('(?<![\\p{L}\\p{N}_@])@'+escapeRegExp(label)+'(?![\\p{L}\\p{N}_])','u').test(text);
 // 群聊（chat 方式）：@谁谁回复；没有 @ 则所有人按顺序回复。回复里再 @ 到别人，被点名的人会接着发言（一轮最多 8 次发言）。
 async function runGroupChat({message,history,participants,call,signal,emit,remember}){
-  const mentioned=text=>participants.filter(p=>text.includes('@'+p.label));
+  const mentioned=text=>participants.filter(p=>mentionsLabel(text,p.label));
   const queue=(mentioned(message).length?mentioned(message):participants).slice(),turn=[],spokenSet=new Set();
   const roster=participants.map(p=>p.label+(p.role?'（'+p.role+'）':'')).join('、');
   let spoken=0;
@@ -2292,15 +2295,15 @@ const server=http.createServer(async(req,res)=>{
       if(!sandboxAllowed(session.user))return json(res,403,{error:'代码沙箱没有启用，请联系管理员'});
       const body=await readBody(req,300*1024),language=String(body.language||''),code=String(body.code??''),command=body.command===undefined?'':String(body.command);
       if(!code.trim()&&!command.trim())return json(res,400,{error:'没有要运行的代码'});
-      let workspaceId='sbx-'+session.user.id;
+      let workspaceId='sbx-ephemeral';const ephemeral=!body.workspace; // 没选工作区：在空目录里跑，不留文件
       if(body.workspace){const workspace=workspaceFor(String(body.workspace),session.user);if(!workspace)return json(res,404,{error:'工作区不存在'});workspaceId=workspace.id}
       if(sandboxBusy.has(session.user.id))return json(res,429,{error:'上一段代码还在运行，请稍候'});
       sandboxBusy.add(session.user.id);
       try{
         addAudit(db,{userId:session.user.id,action:'sandbox.run',target:workspaceId,detail:(language||'command')+' · '+(code||command).length+' 字符'});
-        const result=await runnerJson('/exec',{method:'POST',headers:{'Content-Type':'application/json'},signal:AbortSignal.timeout((sandboxConfig().timeoutSec+40)*1000),body:JSON.stringify({workspace:workspaceId,language,code,command:command||undefined,timeoutSec:sandboxConfig().timeoutSec})});
+        const result=await runnerJson('/exec',{method:'POST',headers:{'Content-Type':'application/json'},signal:AbortSignal.timeout((sandboxConfig().timeoutSec+40)*1000),body:JSON.stringify({workspace:workspaceId,ephemeral,language,code,command:command||undefined,timeoutSec:sandboxConfig().timeoutSec})});
         return json(res,200,result);
-      }catch(error){return json(res,error.status&&error.status<500?error.status:502,{error:error.message||'沙箱执行失败'})}
+      }catch(error){return json(res,[400,413,429].includes(error.status)?error.status:502,{error:error.message||'沙箱执行失败'})}
       finally{sandboxBusy.delete(session.user.id)}
     }
     if(pathname==='/api/admin/engines'&&req.method==='GET'){
@@ -3512,16 +3515,24 @@ const server=http.createServer(async(req,res)=>{
         try{participants=group.members.map(member=>({...resolveParticipant({kind:'agent',...member},session.user,null),strengths:member.strengths||'',modelName:member.model||''}));if(group.mode==='pm')pmParticipant=resolveParticipant({kind:'agent',...group.pm,role:PM_DEFAULT_ROLE},session.user,null)}
         catch(error){return json(res,error.status||400,{error:error.message})}
         {const over=quotaError(session.user);if(over)return json(res,429,{error:over})}
-        busyGroups.add(group.id);
-        const history=group.messages.slice(),now=Date.now();
-        group.messages.push({role:'user',content:message,createdAt:now});
-        if(!history.length&&group.title==='新群聊')group.title=message.replace(/\s+/g,' ').slice(0,40);
-        group.updatedAt=now;await persist();
+        if((activeGroupRuns.get(session.user.id)||0)>=2)return json(res,429,{error:'你已经有 2 个群聊在回复，请等它们结束或先停止'});
+        busyGroups.add(group.id);activeGroupRuns.set(session.user.id,(activeGroupRuns.get(session.user.id)||0)+1);
+        const release=()=>{busyGroups.delete(group.id);activeGroupRuns.set(session.user.id,Math.max(0,(activeGroupRuns.get(session.user.id)||1)-1))};
+        const history=group.messages.slice(),now=Date.now(),previousTitle=group.title;
+        try{
+          group.messages.push({role:'user',content:message,createdAt:now});
+          if(!history.length&&group.title==='新群聊')group.title=message.replace(/\s+/g,' ').slice(0,40);
+          group.updatedAt=now;await persist();
+        }catch(error){group.messages.pop();group.title=previousTitle;release();console.error('群聊保存失败：',error.message);return json(res,500,{error:'保存失败，请重试'})}
         res.writeHead(200,{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-store, no-transform','X-Accel-Buffering':'no','X-Content-Type-Options':'nosniff'});
         const send=(event,data)=>{if(!res.writableEnded&&!res.destroyed)res.write('event: '+event+'\ndata: '+JSON.stringify(data)+'\n\n')};
         const abort=new AbortController();res.on('close',()=>{if(!res.writableEnded)abort.abort()});
         send('start',{group:safeGroup(group)});
-        const remember=(label,text,partial)=>{if(String(text).trim())group.messages.push({role:'agent',label,content:text,createdAt:Date.now(),...(partial?{partial:true}:{})})};
+        const remember=(label,text,partial)=>{
+          if(!String(text).trim())return;
+          group.messages.push({role:'agent',label,content:String(text).slice(0,60000),createdAt:Date.now(),...(partial?{partial:true}:{})});
+          if(group.messages.length>GROUP_MAX_MESSAGES)group.messages.splice(0,group.messages.length-GROUP_MAX_MESSAGES); // 只留最近的，免得一个群越写越大
+        };
         const callModel=async(participant,prompt,onDelta,signal,extraSystem)=>{
           const limit=quotaError(session.user);if(limit)throw fail(429,limit);
           const result=await streamModel([{role:'user',content:prompt}],onDelta,signal,participant.model,[participant.system,extraSystem].filter(Boolean).join('\n\n'));
@@ -3535,7 +3546,7 @@ const server=http.createServer(async(req,res)=>{
               emit:event=>{
                 if(event.type==='turn_start')send('turn_start',{label:event.label,task:event.task||null});
                 else if(event.type==='delta')send('delta',{label:event.label,text:event.text});
-                else if(event.type==='turn_end'){remember(event.label,event.text);send('turn_end',{label:event.label})}
+                else if(event.type==='turn_end'){remember(event.label,event.text,event.partial||event.failed);send('turn_end',{label:event.label})}
                 else if(event.type==='done'&&event.status!=='completed')send('note',{text:'已达到分配轮数上限，产品经理已直接汇总'});
               }});
           }
@@ -3555,7 +3566,8 @@ const server=http.createServer(async(req,res)=>{
         }catch(error){
           if(!error.aborted&&!abort.signal.aborted){console.error('群聊失败：',error.message);send('error',{error:error.message||'群聊失败'})}
         }finally{
-          group.updatedAt=Date.now();busyGroups.delete(group.id);
+          abort.abort(); // 万一还有成员在后台生成，一并停掉
+          group.updatedAt=Date.now();release();
           try{await persist()}catch{}
           send('done',{group:safeGroup(group)});res.end();
         }

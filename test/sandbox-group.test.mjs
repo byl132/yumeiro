@@ -8,11 +8,12 @@ import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRunner } from '../runner/runner.mjs';
+import { runPmTeam } from '../collab.mjs';
 import { mintExecToken, verifyExecToken, normalizeLanguage } from '../runner/sandbox.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ADMIN = { email: 'owner@example.com', password: 'a-very-long-test-password' };
-const TOKEN = 'runner-token-abcdefghij';
+const TOKEN = 'runner-token-abcdefghij', SBX_TOKEN = 'sandbox-token-0123456789';
 let dir, modelServer, sandboxServer, runnerServer, bareRunner, app, base, runnerBase, bareBase, auth;
 const prompts = [];
 const listen = server => new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server.address().port)));
@@ -44,9 +45,9 @@ test.before(async () => {
   });
   const modelPort = await listen(modelServer);
   // 沙箱容器：不挂载工作区，只收文件副本；运行器：带 SANDBOX_URL；bareRunner：没配沙箱
-  sandboxServer = createRunner({ token: TOKEN, root: path.join(dir, 'unused'), env: { ...process.env, SANDBOX_ONLY: '1', MODEL_SECRET: 'must-not-leak' } });
+  sandboxServer = createRunner({ token: SBX_TOKEN, root: path.join(dir, 'unused'), env: { ...process.env, SANDBOX_ONLY: '1', MODEL_SECRET: 'must-not-leak' } });
   const sandboxPort = await listen(sandboxServer);
-  runnerServer = createRunner({ token: TOKEN, root: path.join(dir, 'ws'), env: { ...process.env, SANDBOX_URL: `http://127.0.0.1:${sandboxPort}` } });
+  runnerServer = createRunner({ token: TOKEN, sandboxToken: SBX_TOKEN, root: path.join(dir, 'ws'), env: { ...process.env, SANDBOX_URL: `http://127.0.0.1:${sandboxPort}` } });
   const runnerPort = await listen(runnerServer);
   bareRunner = createRunner({ token: TOKEN, root: path.join(dir, 'ws2'), env: { ...process.env } });
   const barePort = await listen(bareRunner);
@@ -114,7 +115,10 @@ test('沙箱：令牌权限与未配置时的拒绝', async () => {
   assert.equal((await exec(runnerBase, { workspace: 'ws-b', language: 'node', code: 'console.log(1)' }, headers)).status, 403);
   const files = await fetch(runnerBase + '/files?workspace=ws-a', { headers }); assert.equal(files.status, 401, '短期令牌不能访问文件接口');
   assert.equal((await exec(bareBase, { workspace: 'ws-a', language: 'node', code: '1' })).status, 403);
-  assert.equal((await fetch(sandboxServer ? `http://127.0.0.1:${sandboxServer.address().port}/files?workspace=x` : '', { headers: { Authorization: 'Bearer ' + TOKEN } })).status, 404, '沙箱容器不提供文件接口');
+  assert.equal((await fetch(sandboxServer ? `http://127.0.0.1:${sandboxServer.address().port}/files?workspace=x` : '', { headers: { Authorization: 'Bearer ' + SBX_TOKEN } })).status, 404, '沙箱容器不提供文件接口');
+  const withRunnerToken = await fetch(`http://127.0.0.1:${sandboxServer.address().port}/health`, { headers: { Authorization: 'Bearer ' + TOKEN } });
+  assert.equal(withRunnerToken.status, 401, '沙箱不认运行器令牌；沙箱令牌也进不了运行器');
+  assert.equal((await fetch(runnerBase + '/health', { headers: { Authorization: 'Bearer ' + SBX_TOKEN } })).status, 401);
 });
 
 test('应用接口：默认关闭，管理员打开后可运行', async () => {
@@ -179,4 +183,30 @@ test('产品经理带队：按擅长分配任务，成员交付后由产品经�
   const saved = (await call('/api/groups/' + group.id)).data.messages.filter(m => m.role === 'agent');
   assert.match(saved.at(-1).content, /^汇总：来自乙/);
   assert.equal(saved.at(-1).label, '产品经理');
+});
+
+test('沙箱：没有指定工作区时在空目录里跑，不读不写工作区', async () => {
+  const run = await exec(runnerBase, { workspace: 'sbx-ephemeral', ephemeral: true, language: 'node', code: "import fs from 'node:fs';fs.writeFileSync('leak.txt','x');console.log(fs.readdirSync('.').join(','))" });
+  assert.equal(run.data.exitCode, 0); assert.equal(run.data.stdout.trim(), 'leak.txt');
+  assert.deepEqual(run.data.changed, []);
+  await assert.rejects(readFile(path.join(dir, 'ws', 'sbx-ephemeral', 'leak.txt')));
+});
+
+test('群聊：@GPT2 不会同时点到 GPT', async () => {
+  const group = (await call('/api/groups', 'POST', { title: '前缀', mode: 'chat', members: [{ label: 'GPT' }, { label: 'GPT2' }] })).data.group;
+  const run = await sse(`/api/groups/${group.id}/send`, { message: '@GPT2 你好' });
+  assert.deepEqual(run.events.filter(e => e.type === 'turn_start').map(e => e.label), ['GPT2']);
+});
+
+test('产品经理带队：一位成员出错不拖垮整轮，其余成员的成果照常汇总', async () => {
+  const pm = { label: '产品经理' }, members = [{ label: '甲' }, { label: '乙' }];
+  const events = []; let pmCalls = 0;
+  const call = async ({ participant, prompt }) => {
+    if (participant === pm) { pmCalls++; return { text: pmCalls === 1 ? '{"say":"分工","assign":[{"to":"甲","task":"a"},{"to":"乙","task":"b"}]}' : '{"say":"","final":"汇总：' + (prompt.includes('执行失败') ? '甲失败' : '全成功') + '，' + (prompt.includes('来自乙') ? '乙在' : '乙缺') + '"}' }; }
+    if (participant.label === '甲') throw new Error('429 限流');
+    return { text: '来自乙' };
+  };
+  await runPmTeam({ message: 'x', pm, members, call, emit: e => events.push(e) });
+  assert.match(events.filter(e => e.type === 'turn_end').at(-1).text, /汇总：甲失败，乙在/);
+  assert.ok(events.some(e => e.type === 'turn_end' && e.failed && e.label === '甲'));
 });

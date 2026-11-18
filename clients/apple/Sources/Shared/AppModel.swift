@@ -74,6 +74,8 @@ final class AppModel: ObservableObject {
         return nil
     }
 
+    lazy var groupModel = GroupModel(app: self)
+    func sessionExpired() { expired() }
     private func expired() { session.clearLogin(); passwordInput = ""; loginError = "登录已过期，请重新登录"; screen = .login }
 
     // MARK: 登录 / 退出
@@ -106,7 +108,7 @@ final class AppModel: ObservableObject {
     func logout() async {
         stop()
         await api.logout()
-        convs = []; messages = []; pending = []; currentId = nil; title = "新对话"; me = [:]; wallImage = nil; wallGradient = nil; page = nil
+        groupModel.groups = []; groupModel.messages = []; groupModel.current = nil; convs = []; messages = []; pending = []; currentId = nil; title = "新对话"; me = [:]; wallImage = nil; wallGradient = nil; page = nil
         screen = .login
     }
 

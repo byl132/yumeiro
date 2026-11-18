@@ -243,6 +243,10 @@ elif [ "$DBMODE" = 2 ]; then write_secret secrets/db_password "$DBPASS"
 else [ -f secrets/db_password ] || write_secret secrets/db_password "unused"; fi
 if [[ "$RUNNER" =~ ^[Yy] ]]; then
   if [ -s secrets/runner_token ]; then say "保留已有的运行器令牌"; else write_secret secrets/runner_token "$(random_pass 48)"; fi
+  # 沙箱用独立的令牌：沙箱容器里跑的是不可信代码，不能让它持有运行器令牌
+  if [[ "$SANDBOX" =~ ^[Yy] ]]; then
+    if [ -s secrets/sandbox_token ]; then say "保留已有的沙箱令牌"; else write_secret secrets/sandbox_token "$(random_pass 48)"; fi
+  fi
 fi
 write_secret secrets/admin_password "$ADMIN_PASS"
 write_secret secrets/model_api_key "$MODEL_KEY"
