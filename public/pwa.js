@@ -1,4 +1,4 @@
-// PWA 安装按钮、原生客户端引导与“下载客户端”提醒。
+// 原生客户端引导与网页应用安装：只在顶栏放一个 ⬇ 入口（点开后能下载客户端，也能安装网页应用），不再弹出盖住聊天框的提醒条。
 (() => {
   const el = (tag, props = {}, ...children) => {
     const node = document.createElement(tag);
@@ -11,7 +11,6 @@
     node.append(...children.filter(Boolean));
     return node;
   };
-  const DISMISSED = 'yumeiro.client-reminder.v1';
   // 已经在 Windows 客户端（Electron）里了：不再显示“安装客户端 / 添加到主屏幕”的提醒、下载按钮和网页安装按钮，也不注册 Service Worker——这些都是给浏览器用户看的，留着反而像在用网页
   const IN_APP = Boolean(window.yumeiroApp);
   if (IN_APP) document.documentElement.classList.add('in-desktop-app');
@@ -22,20 +21,17 @@
 
   const style = el('style', {}, `
     #clientGuide{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:18px;background:#1118;color:#242334;font:14px/1.6 system-ui,"PingFang SC","Microsoft YaHei",sans-serif}
-    #clientGuide[hidden],#clientReminder[hidden]{display:none!important}
+    #clientGuide[hidden]{display:none!important}
     #clientGuide .cg-card{width:min(560px,100%);max-height:min(88vh,760px);overflow:auto;background:#fff;border-radius:20px;padding:22px;box-shadow:0 20px 70px #0005}
     #clientGuide h2{font-size:20px;margin:0 40px 6px 0}#clientGuide h3{font-size:15px;margin:18px 0 4px}#clientGuide p{margin:5px 0;color:#555365}
     #clientGuide .cg-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}#clientGuide .cg-close{border:0;background:#f1f0f5;border-radius:9px;width:34px;height:34px;font-size:20px;cursor:pointer}
     #clientGuide .cg-links{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}#clientGuide a,#clientGuide button.cg-install{display:inline-flex;align-items:center;justify-content:center;border:1px solid #dedce7;border-radius:10px;padding:8px 12px;background:#fff;color:#352d58;text-decoration:none;font:inherit;cursor:pointer}
     #clientGuide a.cg-primary,#clientGuide button.cg-install{background:#7955c7;color:white;border-color:#7955c7}#clientGuide .cg-note{font-size:12px;color:#777;margin-top:14px}
-    #clientReminder{position:fixed;z-index:69;left:50%;bottom:18px;transform:translateX(-50%);width:min(620px,calc(100% - 28px));box-sizing:border-box;display:flex;align-items:center;gap:10px;padding:11px 12px 11px 16px;border:1px solid #ded8ef;border-radius:15px;background:#fffF;color:#28243a;box-shadow:0 8px 28px #0002;font:14px/1.4 system-ui,"PingFang SC","Microsoft YaHei",sans-serif;backdrop-filter:blur(14px)}
-    #clientReminder .cr-text{flex:1}#clientReminder button{border:0;border-radius:9px;padding:8px 12px;background:#7955c7;color:#fff;font:inherit;cursor:pointer;white-space:nowrap}#clientReminder .cr-dismiss{background:transparent;color:#5f5a6e;padding:6px;font-size:18px}
-    @media(max-width:520px){#clientReminder{bottom:10px;gap:6px;padding:9px 8px 9px 11px;font-size:12px}#clientReminder button{padding:7px 9px}#clientGuide .cg-card{padding:17px}}
   `);
   document.head.append(style);
 
   let deferred = null;
-  let guide, reminder, androidLinks, windowsLinks, sumNote, fillDownloads = () => {};
+  let guide, androidLinks, windowsLinks, sumNote, fillDownloads = () => {};
   function openGuide() {
     if (!guide) buildGuide();
     guide.hidden = false;
@@ -80,16 +76,6 @@
     deferred = null;
     try { await promptEvent.prompt(); await promptEvent.userChoice; } catch { /* 用户取消或浏览器不支持 */ }
     guide?.querySelector('.cg-install')?.setAttribute('hidden', '');
-    document.getElementById('installButton')?.remove();
-  }
-  function showReminder() {
-    try { if (localStorage.getItem(DISMISSED) === '1') return; } catch { /* 隐私模式下仍显示提醒 */ }
-    if (document.getElementById('clientReminder')) return;
-    reminder = el('aside', { id: 'clientReminder', role: 'region', 'aria-label': '客户端安装提醒' },
-      el('span', { className: 'cr-text', textContent: '常用 Yumeiro？安装客户端，或将网页添加到主屏幕。' }),
-      el('button', { type: 'button', textContent: '安装 / 下载', on: { click: openGuide } }),
-      el('button', { type: 'button', className: 'cr-dismiss', textContent: '×', title: '暂时关闭提醒', 'aria-label': '暂时关闭提醒', on: { click: () => { reminder.hidden = true; try { localStorage.setItem(DISMISSED, '1'); } catch {} } } }));
-    document.body.append(reminder);
   }
   function place() {
     const anchor = document.getElementById('guideButton') || document.getElementById('speakButton') || document.getElementById('drawButton') || document.getElementById('historyButton') || document.getElementById('memoryButton');
@@ -103,15 +89,10 @@
       const button = el('button', { id: 'clientGuideButton', type: 'button', className: 'icon-button', title: '下载客户端 / 安装引导', textContent: '⬇' });
       button.setAttribute('aria-label', '下载客户端与安装引导'); button.addEventListener('click', openGuide); anchor.before(button);
     }
-    if (!IN_APP && deferred && !document.getElementById('installButton')) {
-      const button = el('button', { id: 'installButton', type: 'button', className: 'icon-button', title: '安装为独立网页应用', textContent: '📲' });
-      button.setAttribute('aria-label', '安装网页应用'); button.addEventListener('click', installPwa); anchor.before(button);
-    }
-    if (!IN_APP) showReminder();
     return true;
   }
-  window.addEventListener('beforeinstallprompt', event => { event.preventDefault(); deferred = event; place(); });
-  window.addEventListener('appinstalled', () => { deferred = null; document.getElementById('installButton')?.remove(); guide?.querySelector('.cg-install')?.setAttribute('hidden', ''); });
+  window.addEventListener('beforeinstallprompt', event => { event.preventDefault(); deferred = event; guide?.querySelector('.cg-install')?.removeAttribute('hidden'); });
+  window.addEventListener('appinstalled', () => { deferred = null; guide?.querySelector('.cg-install')?.setAttribute('hidden', ''); });
   let tries = 0;
   const timer = setInterval(() => { if (place() && ++tries > 6) clearInterval(timer); if (++tries > 120) clearInterval(timer); }, 1500);
 })();

@@ -215,6 +215,20 @@ say "  装好后：管理设置 → 桌面端 → 软件更新 里可以随时�
 ask DESKTOP_CHOICE "选择 [1/2/3]" "3" YUMEIRO_DESKTOP
 case "$DESKTOP_CHOICE" in 1|global|Global) DESKTOP_REGION=global ;; 2|cn|CN) DESKTOP_REGION=cn ;; *) DESKTOP_REGION="" ;; esac
 
+# ---------- 5c. IP 纯净度检测（CleanIP，可选）----------
+say
+say "5c IP 纯净度检测（可选）：接入 cleanip.io，让“环境检测”的综合研判更准"
+say "  为什么需要："
+say "    Claude、OpenAI 等官方服务对出口 IP 的信誉很敏感：被滥用的共享机房 IP、VPN / 代理 IP 容易被要求验证、限流，甚至影响账号。"
+say "    内置检测只能粗略判断“是不是机房 / 代理”；CleanIP 会给出 0–100 的纯净度评分、IP 类型（住宅 / 机房等）和黑名单命中情况，"
+say "    综合研判会把它和 Cloudflare、连通性探测、用量统计合在一起，告诉你这个出口适不适合接官方服务。"
+say "  要注意："
+say "    · 这里只是决定“要不要启用”，不会替你注册账号。要用它，之后在 管理设置 → 环境检测 里填你自己的 CleanIP 密钥（cip_ 开头，到 cleanip.io/account 免费创建，免费账号每天 20 个不同 IP）。"
+say "    · 启用并填了密钥后，会把服务器的出口 IP 发给 cleanip.io（内置检测本来就会把它发给 ip-api.com）；没填密钥时不会发任何请求。"
+say "    · 不启用完全不影响使用，综合研判只用本地信号；以后可在同一个页面随时开关。"
+ask CLEANIP "启用 CleanIP 纯净度检测？(y/N)" "n" YUMEIRO_CLEANIP
+CLEANIP_ON=0; [[ "$CLEANIP" =~ ^[Yy1] ]] && CLEANIP_ON=1
+
 # ---------- 6. 网络环境 ----------
 say
 say "6/6 服务器位置"
@@ -269,6 +283,7 @@ write_secret secrets/model_api_key "$MODEL_KEY"
   echo "ADMIN_EMAIL=$ADMIN_EMAIL"
   [ -n "$MODEL_BASE_URL" ] && { echo "MODEL_BASE_URL=$MODEL_BASE_URL"; echo "MODEL_NAME=$MODEL_NAME"; }
   [ -n "$NPM_REGISTRY" ] && echo "NPM_REGISTRY=$NPM_REGISTRY"
+  [ "$CLEANIP_ON" = 1 ] && echo "YUMEIRO_CLEANIP=1"
   echo "MODEL_TIMEOUT_MS=120000"
 } > .env
 chmod 600 .env

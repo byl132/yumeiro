@@ -177,6 +177,14 @@ test('环境检测接口：仅主账号；守卫设置可保存，代理地址�
   assert.equal(saved.data.guard.hourlyLimit, 10); assert.deepEqual(saved.data.guard.restricted, ['CN', 'RU']); assert.equal(saved.data.guard.hasProxy, true);
   assert.doesNotMatch(JSON.stringify(saved.data), /secret/);
   assert.equal((await call(owner, '/api/admin/env/guard', 'PUT', { clearProxy: true })).data.guard.hasProxy, false);
+  // CleanIP 密钥：格式不对被拒；保存后接口和审计里都只有掩码；可以清除
+  assert.equal((await call(owner, '/api/admin/env/guard', 'PUT', { cleanipKey: 'sk-not-cleanip' })).status, 400);
+  const withKey = await call(owner, '/api/admin/env/guard', 'PUT', { cleanipKey: 'cip_abcdefgh12345678', cleanipEnabled: true });
+  assert.equal(withKey.data.guard.hasCleanipKey, true); assert.equal(withKey.data.guard.cleanipKey, 'cip_••••5678');
+  assert.doesNotMatch(JSON.stringify(withKey.data), /abcdefgh12345678/);
+  assert.doesNotMatch(JSON.stringify((await call(owner, '/api/admin/env')).data), /abcdefgh12345678/);
+  assert.doesNotMatch(JSON.stringify((await call(owner, '/api/audit?action=settings.guard')).data), /abcdefgh12345678/, '审计里不能出现明文密钥');
+  assert.equal((await call(owner, '/api/admin/env/guard', 'PUT', { clearCleanipKey: true })).data.guard.hasCleanipKey, false);
   assert.ok((await call(owner, '/api/audit?action=settings.guard')).data.entries.length >= 2);
 });
 

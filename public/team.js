@@ -105,7 +105,7 @@
     audit: ['☰', '操作记录', '按账号查看模型调用、文件操作、删除记录和登录情况，方便排查问题。'],
     env: ['◎', '环境检测', '实时检测服务器到 Claude / ChatGPT / Gemini / DeepSeek 的网络、出口 IP 与地区，评估被限制或封号的风险，并在风险发生前拒绝请求。'],
     doctor: ['✚', '服务器体检', '一键检查服务器：磁盘、内存、权限、HTTPS 与反向代理、模型接入、运行器、DNS、时间同步，以及到 Claude / ChatGPT / Gemini / DeepSeek 的可达性，并给出处理建议。只读，不改任何配置。'],
-    security: ['⚿', '账号安全', '设置恢复密钥；忘记密码时用恢复密钥，或用已登录的手机确认，就能登录并改密码。'],
+    security: ['⛨', '账号安全', '设置恢复密钥；忘记密码时用恢复密钥，或用已登录的手机确认，就能登录并改密码。'],
     site: ['⌂', '站点设置', '站点名称、登录页公告、个人/团队模式、默认模型和登录安全策略。']
   };
   const tabLabel = id => (pageMode === 'admin' && id === 'usage') ? '团队用量' : (pageMode === 'admin' && id === 'audit') ? '审计与统计' : (pageMode === 'admin' && id === 'dashboard') ? '团队仪表盘' : ((MEMBER_TABS.concat(ADMIN_TABS).find(t => t[0] === id) || [])[1] || id);
@@ -220,7 +220,6 @@
       pop.replaceChildren(
         el('div', { class: 'acct-head' }, el('div', { class: 'acct-name', textContent: me.displayName || me.email }), el('div', { class: 'acct-sub', textContent: (me.role === 'admin' ? '主账号 · ' : '成员 · ') + me.email })),
         balBox,
-        item('⌘', '我的设置', () => { location.href = '/settings'; }),
         me.role === 'admin' && item('⚙', '管理设置', () => { location.href = '/admin/settings'; }),
         me.role === 'admin' && item('▤', '管理面板', () => trigger('adminPanelButton')),
         el('div', { class: 'acct-sep' }),
@@ -1833,12 +1832,27 @@
     const COLORS = { ok: '#2f9e6b', warn: '#d98e04', danger: '#c0392b' }, LABELS = { ok: '正常', warn: '注意', danger: '高风险' };
     const badge = level => el('span', { textContent: LABELS[level] || level, style: `display:inline-block;align-self:flex-start;width:fit-content;padding:1px 8px;border-radius:10px;color:#fff;font-size:12px;background:${COLORS[level] || '#888'}` });
     let data = null, timer = null, busy = false;
+    // 系统综合研判：把 Cloudflare、ip-api、CleanIP、连通性探测、用量统计合成一个分数，并列出每一项依据
+    const verdictCard = r => {
+      const v = r.verdict, c = r.cleanip;
+      if (!v) return null;
+      const lines = [];
+      if (c && c.ok) lines.push(el('div', { style: 'font-size:12px;margin-top:6px' }, 'CleanIP：' + (c.score !== null ? '纯净度 ' + c.score + (c.grade ? '（' + c.grade + '）' : '') : '无纯净度数据') + (c.type ? ' · ' + c.type : '') + (c.flags.length ? ' · 标记：' + c.flags.join('、') : '') + (c.reportUrl ? '　' : ''), c.reportUrl ? el('a', { href: c.reportUrl, target: '_blank', rel: 'noopener noreferrer', textContent: '完整报告' }) : null));
+      else if (c && c.error) lines.push(el('div', { style: 'font-size:12px;margin-top:6px;color:' + COLORS.warn, textContent: 'CleanIP 暂不可用：' + c.error + '（本次综合研判只用了本地信号）' }));
+      return el('div', { style: 'border:1px solid var(--line);border-radius:10px;padding:10px;margin:8px 0' },
+        el('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap' }, el('strong', { textContent: '综合研判' }), badge(v.level), el('span', { style: 'font-size:22px;font-weight:700', textContent: v.score }), el('span', { class: 'team-note', textContent: '/ 100 · 等级 ' + v.grade }), el('span', { textContent: v.summary })),
+        el('div', { class: 'team-note', textContent: '依据来源：' + v.sources.join('、') + (c && c.ok && c.score !== null ? '' : '（未接入 CleanIP 时只用本地信号）') }),
+        ...lines,
+        ...v.factors.map(f => el('div', { style: 'font-size:13px', textContent: '• [' + f.source + '] ' + f.text + (f.delta ? '（' + f.delta + '）' : '') })),
+        v.factors.length ? null : el('div', { style: 'font-size:13px;color:' + COLORS.ok, textContent: '• 没有发现扣分项' }));
+    };
     const draw = () => {
       const r = data.result;
       if (!r) { live.replaceChildren(el('p', { class: 'team-note', textContent: '正在检测网络、出口 IP 和地区…（首次检测最长约 10 秒）' })); status.textContent = ''; setTimeout(() => poll(true), 2500); return; }
       const e = r.egress || {};
       live.replaceChildren(
         el('div', { class: 'team-row' }, el('div', { class: 'grow' }, '服务器出口：' + (e.ip || '未知') + (e.country ? '　地区 ' + e.country : '') + (e.isp ? '　' + e.isp : ''), el('small', { textContent: (e.hosting ? '数据中心/托管 IP　' : '') + (e.proxy ? '被识别为代理/VPN　' : '') + (r.proxy ? '出口代理 ' + r.proxy : '未使用出口代理') + (e.error ? '　（' + e.error + '）' : '') })), badge(r.level)),
+        verdictCard(r),
         ...Object.entries(r.vendors).map(([id, v]) => el('div', { style: 'border:1px solid var(--line);border-radius:10px;padding:10px;margin:8px 0' },
           el('div', { style: 'display:flex;gap:8px;align-items:center' }, el('strong', { textContent: v.name }), badge(v.level), v.block ? el('span', { textContent: '已开启拒绝：新请求会被拦下', style: 'color:#c0392b;font-size:12px' }) : null),
           el('div', { style: 'display:flex;flex-wrap:wrap;gap:12px;margin:6px 0;font-size:12px' }, v.probes.map(p => el('span', { style: 'color:' + (p.reachable ? (p.challenged ? COLORS.warn : COLORS.ok) : COLORS.danger), textContent: `${p.label}：${p.reachable ? 'HTTP ' + p.status + ' · ' + p.ms + ' ms' + (p.challenged ? '（被挑战）' : '') : '不通 ' + (p.error || '')}` }))),
@@ -1855,13 +1869,21 @@
     const enabled = el('input', { type: 'checkbox', checked: g.enabled }), restricted = el('input', { class: 'wide', value: g.restricted.join(', '), placeholder: '受限地区代码，如 CN, HK, RU' });
     const hourly = el('input', { type: 'number', min: 1, value: g.hourlyLimit, style: 'width:120px' }), conc = el('input', { type: 'number', min: 1, value: g.maxConcurrent, style: 'width:120px' });
     const proxy = el('input', { class: 'wide', type: 'password', autocomplete: 'off', placeholder: g.hasProxy ? '已配置：' + g.proxyUrl + '（留空不修改）' : '出口代理，如 http://127.0.0.1:7890（可选）' });
+    const cleanip = el('input', { class: 'wide', type: 'password', autocomplete: 'off', placeholder: g.hasCleanipKey ? '已配置：' + g.cleanipKey + '（留空不修改）' : 'CleanIP 密钥（cip_ 开头，可选；在 cleanip.io/account 免费创建）' });
+    const cleanipOn = el('input', { type: 'checkbox', checked: g.cleanipEnabled });
     const save = async clear => {
-      try { await api('/api/admin/env/guard', { method: 'PUT', body: JSON.stringify({ enabled: enabled.checked, restricted: restricted.value, hourlyLimit: Number(hourly.value), maxConcurrent: Number(conc.value), ...(clear ? { clearProxy: true } : proxy.value ? { proxyUrl: proxy.value } : {}) }) }); proxy.value = ''; err.textContent = ''; status.textContent = '已保存'; poll(true); } catch (e) { err.textContent = e.message; }
+      try { await api('/api/admin/env/guard', { method: 'PUT', body: JSON.stringify({ enabled: enabled.checked, restricted: restricted.value, hourlyLimit: Number(hourly.value), maxConcurrent: Number(conc.value), cleanipEnabled: cleanipOn.checked, ...(clear === 'cleanip' ? { clearCleanipKey: true } : cleanip.value ? { cleanipKey: cleanip.value } : {}), ...(clear === true ? { clearProxy: true } : proxy.value ? { proxyUrl: proxy.value } : {}) }) }); proxy.value = ''; cleanip.value = ''; err.textContent = ''; status.textContent = '已保存'; poll(true); } catch (e) { err.textContent = e.message; }
     };
     form.append(el('h4', { textContent: '防封守卫设置' }),
       el('div', { class: 'team-note', textContent: '守卫只做三件事：检测、提示、在风险出现前拒绝请求（受限地区出口、调用过密、并发过高）。它不会也不能帮你绕过任何平台的风控；受限地区请改用受支持地区的合规出口，或换用该地区合法可用的模型服务商。受限地区清单仅供参考，请以各家官方“支持的国家和地区”页面为准。' }),
       el('div', { class: 'team-form' }, el('label', {}, enabled, ' 启用拒绝'), restricted, el('label', {}, '引擎每小时上限 ', hourly), el('label', {}, '引擎并发上限 ', conc), proxy,
-        el('button', { type: 'button', class: 'secondary', textContent: '保存', on: { click: () => save(false) } }), g.hasProxy ? el('button', { type: 'button', class: 'secondary', textContent: '清除出口代理', on: { click: () => save(true) } }) : null));
+        el('div', { class: 'team-note', style: 'margin-top:10px' }, el('strong', { textContent: 'CleanIP 纯净度检测（可选）' }),
+          el('div', { textContent: '为什么需要：Claude、OpenAI 等官方服务对出口 IP 的信誉很敏感，被滥用的共享机房 IP、VPN / 代理 IP 容易被要求验证、限流，甚至影响账号。内置检测只能粗略判断“是不是机房 / 代理”；CleanIP 会给出 0–100 的纯净度评分、IP 类型和黑名单命中情况，让上面的“综合研判”更准。' }),
+          el('div', { textContent: '怎么用：到 cleanip.io/account 免费注册并创建密钥（cip_ 开头，免费账号每天 20 个不同 IP），填在下面，再勾选启用。不用它完全不影响使用，综合研判只用本地信号。' }),
+          el('div', { textContent: '隐私：启用并填了密钥后，会把服务器的出口 IP 发给 cleanip.io；没填密钥或没勾选时不会发任何请求。' }),
+          el('div', { style: 'color:' + (g.cleanipEnabled && g.hasCleanipKey ? COLORS.ok : g.cleanipEnabled ? COLORS.warn : 'inherit'), textContent: '当前状态：' + (g.cleanipEnabled ? (g.hasCleanipKey ? '已启用，密钥 ' + g.cleanipKey : '安装时选择了启用，还差填写你自己的 CleanIP 密钥') : '未启用') })),
+        el('label', {}, cleanipOn, ' 启用 CleanIP（免费账号每天 20 个不同 IP，同一出口 6 小时内只查一次）'), cleanip,
+        el('button', { type: 'button', class: 'secondary', textContent: '保存', on: { click: () => save(false) } }), g.hasProxy ? el('button', { type: 'button', class: 'secondary', textContent: '清除出口代理', on: { click: () => save(true) } }) : null, g.hasCleanipKey ? el('button', { type: 'button', class: 'secondary', textContent: '清除 CleanIP 密钥', on: { click: () => save('cleanip') } }) : null));
     body.append(el('div', { style: 'display:flex;gap:10px;align-items:center' }, el('button', { type: 'button', class: 'secondary', textContent: '立即检测', on: { click: () => poll(true) } }), status), err, live, form,
       el('div', { class: 'team-note', textContent: '提示：Claude Code / Codex 的“订阅账号登录”与“官方 API Key”风险不同——多人共用同一个个人订阅账号通常违反服务条款，被封风险最高；团队使用请让每人用自己的账号，或统一使用官方 API Key。' }));
     poll(false);
@@ -1875,11 +1897,11 @@
     const notice = el('textarea', { placeholder: '登录页公告（可选），如：本周六凌晨 2 点维护。最多 200 字。', maxLength: 200, style: 'min-height:70px' });
     notice.value = site.notice;
     body.append(
-      el('p', { class: 'team-note', textContent: '这里设置的名称和公告会显示在成员登录页（/）和管理员登录页（/admin）上，未登录也能看到，请不要写敏感信息。' }),
+      el('p', { class: 'team-note', textContent: '这里设置的名称和公告会显示在登录页上，未登录也能看到，请不要写敏感信息。' }),
       el('div', { class: 'team-form' }, name, notice, el('label', {}, '使用模式　', mode), el('button', { type: 'button', class: 'secondary wide', textContent: '保存', on: { click: async () => {
         try { await api('/api/admin/site', { method: 'PUT', body: JSON.stringify({ name: name.value, notice: notice.value, mode: mode.value }) }); err.textContent = ''; info.textContent = '已保存；切换使用模式后刷新页面生效'; } catch (e) { err.textContent = e.message; }
       } } })), info, err,
-      el('p', { class: 'team-note', textContent: '登录入口：成员用 ' + location.origin + '/ ，管理员用 ' + location.origin + '/admin 。管理员账号不能从成员入口登录，成员账号也进不了管理员入口。' }));
+      el('p', { class: 'team-note', textContent: '登录入口：管理员和成员都用 ' + location.origin + '/ ，身份由账号决定，登录后自动进入对应的界面（旧的 /admin 地址会跳转到这里）。' }));
   }
 
   // 非 HTTPS（例如 http://IP:端口）下 navigator.clipboard 不可用，退回到选中文本 + execCommand。

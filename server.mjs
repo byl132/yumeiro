@@ -23,7 +23,7 @@ import { createMarketSources } from './market-sources.mjs';
 import { LANGS as ASR_LANGS, PRESETS as ASR_PRESETS, AUDIO_TYPES, MAX_AUDIO_BYTES, normalizeAsrConfig, publicAsrConfig, asrKinds, silenceWav, transcribe as asrTranscribe } from './asr.mjs';
 import { loadAsrExtras } from './asr-native.mjs';
 import { addAudit, queryAudit, summarize, toCsv, categoryOf, CATEGORY, dashboardData } from './audit.mjs';
-import { TARGETS, VENDORS, VENDOR_NAMES, DEFAULT_RESTRICTED, normalizeGuard, validProxyUrl, maskProxy, vendorOfUrl, vendorOfEngine, usesProxy, probeTarget, detectEgress, evaluate } from './envcheck.mjs';
+import { TARGETS, VENDORS, VENDOR_NAMES, DEFAULT_RESTRICTED, normalizeGuard, validProxyUrl, maskProxy, vendorOfUrl, vendorOfEngine, usesProxy, probeTarget, detectEgress, evaluate, detectCleanIp, validCleanipKey, maskCleanipKey } from './envcheck.mjs';
 import { fetch as undiciFetch, ProxyAgent } from 'undici';
 import { normalizeTtsConfig, publicTtsConfig, defaultTtsConfig, speechEndpoint, cleanSpeechRequest, buildSpeechRequest, speechCacheKey, sniffAudio, parseMultipart, audioTypeOf, LIMITS as TTS_LIMITS } from './tts.mjs';
 import { createZip, readZip, safeEntryName } from './ziputil.mjs';
@@ -422,14 +422,24 @@ function modelMessages(history,system=systemPrompt){return system?[{role:"system
 // ---- 环境检测与防封守卫（实现见 envcheck.mjs）----
 const appMode=()=>db.settings.mode==='personal'||db.settings.mode==='team'?db.settings.mode:(process.env.YUMEIRO_USAGE==='personal'?'personal':'team');
 const personalOnly=res=>json(res,403,{error:'个人使用模式下已关闭团队功能。如需添加成员，请在“站点设置”里切换为团队模式。'});
-const guardConfig=()=>normalizeGuard(db.settings.guard);
+// CleanIP 是否启用：安装向导里选了“启用”会写入 YUMEIRO_CLEANIP=1 作为默认值；管理员在设置页保存过之后以设置页为准
+const guardConfig=()=>normalizeGuard({cleanipEnabled:process.env.YUMEIRO_CLEANIP==='1',...db.settings.guard});
+const publicGuard=guard=>({...guard,proxyUrl:maskProxy(guard.proxyUrl),hasProxy:Boolean(guard.proxyUrl),cleanipKey:maskCleanipKey(guard.cleanipKey),hasCleanipKey:Boolean(guard.cleanipKey)});
 let proxyAgent=null,proxyAgentUrl='';
 const proxyDispatcher=()=>{const url=guardConfig().proxyUrl;if(!url)return null;if(proxyAgentUrl!==url){proxyAgent=new ProxyAgent(url);proxyAgentUrl=url}return proxyAgent};
 // 发往 Claude / OpenAI 官方域名的请求，配置了出口代理就走代理；其他请求不受影响
 function upstreamFetch(url,init={}){const dispatcher=usesProxy(vendorOfUrl(String(url)))?proxyDispatcher():null;return dispatcher?undiciFetch(url,{...init,dispatcher}):fetch(url,init)}
 const viaConfiguredProxy=(url,init={})=>{const dispatcher=proxyDispatcher();return dispatcher?undiciFetch(url,{...init,dispatcher}):fetch(url,init)};
 const engineActive={claude:0,codex:0};
-const envState={result:null,at:0,probing:null,regions:[],levels:{}};
+const envState={result:null,at:0,probing:null,regions:[],levels:{},cleanip:null};
+async function cleanipFor(ip,guard){
+  if(!guard.cleanipEnabled||!guard.cleanipKey||!ip)return null;
+  const cached=envState.cleanip;
+  if(cached&&cached.ip===ip&&cached.key===guard.cleanipKey&&Date.now()-cached.at<(cached.value.ok?6*3600000:10*60000))return cached.value;
+  const value=await detectCleanIp({ip,key:guard.cleanipKey});
+  envState.cleanip={ip,key:guard.cleanipKey,at:Date.now(),value};
+  return value;
+}
 function guardUsage(now=Date.now()){
   const out={claude:{lastHour:0,concurrent:engineActive.claude,users:new Set()},codex:{lastHour:0,concurrent:engineActive.codex,users:new Set()},gemini:{lastHour:0,concurrent:0,users:new Set()},deepseek:{lastHour:0,concurrent:0,users:new Set()}};
   for(let i=db.audit.length-1;i>=0;i--){
@@ -450,7 +460,7 @@ async function refreshEnv(force=false){
       const now=Date.now();
       if(egress.country)envState.regions.push({at:now,country:egress.country});
       envState.regions=envState.regions.filter(item=>item.at>now-86400000);
-      const guard=guardConfig(),result=evaluate({egress,probes,guard,usage:guardUsage(now),regionHistory:envState.regions.map(item=>item.country)});
+      const guard=guardConfig(),cleanip=await cleanipFor(egress.ip,guard),result=evaluate({egress,probes,guard,usage:guardUsage(now),regionHistory:envState.regions.map(item=>item.country),cleanip});
       result.proxy=guard.proxyUrl?maskProxy(guard.proxyUrl):'';
       for(const [vendor,info] of Object.entries(result.vendors)){
         const key=info.level+(info.block?'!':'');
@@ -1271,7 +1281,6 @@ async function handleBot(req,res,pathname){
 // 仅按白名单提供 public 下的静态文件，不拼接请求路径，避免目录穿越。
 const staticFiles={
   '/index.html':{name:'index.html',type:'text/html; charset=utf-8',html:true},
-  '/admin':{name:'index.html',type:'text/html; charset=utf-8',html:true},
   '/settings':{name:'index.html',type:'text/html; charset=utf-8',html:true},
   '/market':{name:'index.html',type:'text/html; charset=utf-8',html:true},
   '/workspaces':{name:'index.html',type:'text/html; charset=utf-8',html:true},
@@ -1917,6 +1926,7 @@ const server=http.createServer(async(req,res)=>{
         if(req.method==='HEAD')return res.end();
         const stream=createReadStream(filePath,{start,end});stream.on('error',()=>res.destroy());stream.pipe(res);return;
       }
+      if(pathname==='/admin'||pathname==='/admin/'){res.writeHead(302,{Location:'/','Cache-Control':'no-store'});return res.end()} // 旧的管理员登录地址：现在只有一个登录入口
       const file=INVITE_PAGE.test(pathname)?{name:'invite.html',type:'text/html; charset=utf-8',html:true}:staticFiles[pathname==='/'?'/index.html':pathname];
       if(!file)return json(res,404,{error:'未找到'});
       let body=await readFile(path.join(root,'public',file.name));
@@ -2065,9 +2075,7 @@ const server=http.createServer(async(req,res)=>{
       const passwordOk=await verifyPassword(password,user?.passwordHash||'');
       if(!user||!passwordOk){recordFailedAdminLogin(req,email);await recordSecurityEvent('login_failed',req,null,{accountHash:sha(email).slice(0,10)});return json(res,401,{error:'邮箱或密码不正确'})}
       if(user.disabled)return json(res,403,{error:'此账号已被主账号停用'});
-      const portal=body.portal==='admin'||body.portal==='member'?body.portal:null;
-      if(portal==='admin'&&user.role!=='admin')return json(res,403,{error:'这个账号不是管理员，请从成员入口登录'});
-      if(portal==='member'&&user.role==='admin')return json(res,403,{error:'管理员请从管理员入口登录（地址后面加 /admin）'});
+      // 管理员和成员使用同一个登录入口：身份只由账号决定（body.portal 是旧版页面传的，现在忽略）
       resetAdminLoginFailures(req,email);user.lastLoginAt=Date.now();
       try{const result=await issueAppSession(res,user);await recordSecurityEvent('login_success',req,user.id);return json(res,200,result)}catch(error){return json(res,error.status||429,{error:error.message})}
     }
@@ -3237,18 +3245,20 @@ const server=http.createServer(async(req,res)=>{
       // 首次打开不让页面干等探测（最长约 8 秒）：先返回空结果，探测在后台进行，页面稍后轮询
       let result=fresh?await refreshEnv(true):envState.result;
       if(!result&&!fresh){refreshEnv(true).catch(()=>{})}
-      return json(res,200,{result,guard:{...guard,proxyUrl:maskProxy(guard.proxyUrl),hasProxy:Boolean(guard.proxyUrl)},defaultRestricted:DEFAULT_RESTRICTED,usage:guardUsage()});
+      return json(res,200,{result,guard:publicGuard(guard),defaultRestricted:DEFAULT_RESTRICTED,usage:guardUsage()});
     }
     if(pathname==='/api/admin/env/guard'&&req.method==='PUT'){
       if(!isAdmin)return adminOnly();
       const body=await readBody(req),current=guardConfig();
-      let proxyUrl=current.proxyUrl;
+      let proxyUrl=current.proxyUrl,cleanipKey=current.cleanipKey;
+      if(body.clearCleanipKey===true)cleanipKey='';
+      else if(body.cleanipKey){if(!validCleanipKey(body.cleanipKey))return json(res,400,{error:'CleanIP 密钥格式不对：应以 cip_ 开头，可在 cleanip.io/account 免费创建'});cleanipKey=String(body.cleanipKey).trim()}
       if(body.clearProxy===true)proxyUrl='';
       else if(body.proxyUrl){if(!validProxyUrl(body.proxyUrl))return json(res,400,{error:'出口代理地址必须是 http:// 或 https:// 开头的完整地址'});proxyUrl=String(body.proxyUrl).trim()}
-      db.settings.guard=normalizeGuard({...current,...(body.enabled!==undefined?{enabled:Boolean(body.enabled)}:{}),...(body.restricted!==undefined?{restricted:body.restricted}:{}),...(body.hourlyLimit!==undefined?{hourlyLimit:body.hourlyLimit}:{}),...(body.maxConcurrent!==undefined?{maxConcurrent:body.maxConcurrent}:{}),proxyUrl});
-      addAudit(db,{userId:session.user.id,action:'settings.guard',target:'env',detail:JSON.stringify({...db.settings.guard,proxyUrl:db.settings.guard.proxyUrl?'（已配置）':''}),ip:clientIp(req)});
-      envState.at=0;envState.result=null;await persist();
-      const guard=guardConfig();return json(res,200,{guard:{...guard,proxyUrl:maskProxy(guard.proxyUrl),hasProxy:Boolean(guard.proxyUrl)}});
+      db.settings.guard=normalizeGuard({...current,...(body.enabled!==undefined?{enabled:Boolean(body.enabled)}:{}),...(body.restricted!==undefined?{restricted:body.restricted}:{}),...(body.hourlyLimit!==undefined?{hourlyLimit:body.hourlyLimit}:{}),...(body.maxConcurrent!==undefined?{maxConcurrent:body.maxConcurrent}:{}),...(body.cleanipEnabled!==undefined?{cleanipEnabled:Boolean(body.cleanipEnabled)}:{}),cleanipKey,proxyUrl});
+      addAudit(db,{userId:session.user.id,action:'settings.guard',target:'env',detail:JSON.stringify({...db.settings.guard,proxyUrl:db.settings.guard.proxyUrl?'（已配置）':'',cleanipKey:db.settings.guard.cleanipKey?'（已配置）':''}),ip:clientIp(req)});
+      envState.at=0;envState.result=null;envState.cleanip=null;await persist();
+      const guard=guardConfig();return json(res,200,{guard:publicGuard(guard)});
     }
     // ---- 历史记录树（给“历史动画”用）----
     // ---- 语音朗读 ----

@@ -35,7 +35,7 @@
     thanks: ['听到你这么说我好开心 That made my day']
   };
   const pick = list => list[Math.floor(Math.random() * list.length)];
-  const defaults = () => ({ enabled: true, size: host ? 150 : 130, walk: true, roam: 'screen' });   // roam：screen = 桌面端在整个屏幕里漫游；bottom = 只沿当前高度左右走
+  const defaults = () => ({ enabled: Boolean(host), size: host ? 150 : 130, walk: true, roam: 'screen' });   // roam：screen = 桌面端在整个屏幕里漫游；bottom = 只沿当前高度左右走
   const load = () => { try { return { ...defaults(), ...JSON.parse(localStorage.getItem(KEY) || '{}') }; } catch { return defaults(); } };
   let prefs = load();
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(prefs)); } catch { /* 存储满了就算了 */ } };
@@ -141,7 +141,7 @@
   const style = document.createElement('style');
   style.textContent = `
     #ymPet{position:fixed;z-index:60;user-select:none;-webkit-user-select:none;touch-action:none;cursor:grab;display:flex;flex-direction:column;align-items:center;transition:opacity .25s}
-    #ymPet.hidden{display:none}#ymPet.drag{cursor:grabbing}
+    #ymPet.hidden,body:has(#loginShell:not([hidden])) #ymPet{display:none!important}#ymPet.drag{cursor:grabbing}
     #ymPet .pet-body{position:relative;width:100%;transform-origin:50% 100%;transition:transform .35s cubic-bezier(.3,1.5,.5,1);will-change:transform;filter:drop-shadow(0 5px 7px #0005)}
     #ymPet .pet-stage{position:relative;width:100%;aspect-ratio:450/517;pointer-events:none}
     #ymPet .pet-stage img{position:absolute;left:50%;bottom:0;translate:-50% 0;height:auto;visibility:hidden;pointer-events:none;-webkit-user-drag:none;user-select:none}#ymPet .pet-stage img.on{visibility:visible}

@@ -2,8 +2,8 @@
 (() => {
   const style = document.createElement('style');
   style.textContent = `
-    .ym-mascot{display:block;margin:-6px auto 10px;width:128px;height:128px;object-fit:cover;border-radius:26px;box-shadow:0 10px 30px #b04bff55,0 0 0 1px #ffffff1f;animation:ymFloat 5s ease-in-out infinite}
-    .ym-mascot.big{width:170px;height:170px;border-radius:32px}
+    .ym-mascot{display:block;margin:-6px auto 8px;width:72px;height:72px;object-fit:cover;border-radius:18px;box-shadow:0 10px 30px #b04bff55,0 0 0 1px #ffffff1f;animation:ymFloat 5s ease-in-out infinite}
+    .ym-mascot.big{width:96px;height:96px;border-radius:24px}
     @keyframes ymFloat{50%{transform:translateY(-5px)}}
     @media (prefers-reduced-motion:reduce){.ym-mascot{animation:none}}
     .brand-mark.ym-face{background:url(/icon.svg) center/cover no-repeat!important;color:transparent!important;font-size:0!important;box-shadow:0 2px 10px #e9516466}

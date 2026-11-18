@@ -150,7 +150,7 @@ fun LoginScreen(vm: AppViewModel) {
             Button(onClick = { vm.login() }, enabled = !vm.loginBusy, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Accent)) { Text(if (vm.loginBusy) "登录中…" else "登录", fontSize = 16.sp) }
         }
         Spacer(Modifier.height(14.dp))
-        Text("账号由团队管理员创建。管理员请用网页版的 /admin 入口登录管理后台。", color = Muted, fontSize = 12.sp, modifier = Modifier.widthIn(max = 440.dp))
+        Text("账号由团队管理员创建，管理员和成员使用同一个登录入口。", color = Muted, fontSize = 12.sp, modifier = Modifier.widthIn(max = 440.dp))
     }
 }
 

@@ -501,33 +501,32 @@ test('Cindy 托管模型：同步目录、仅所属用户可用、走网关密�
   assert.equal((await call('/api/models')).data.models.some(m => m.provider.startsWith('cindy-')), false);
 });
 
-test('登录入口：/ 成员、/admin 管理员；角色与入口不匹配被拒绝；站点名称与公告', async () => {
+test('登录入口：只有一个入口，管理员和成员都从 / 登录；/admin 跳转到 /；站点名称与公告', async () => {
   const owner = { cookie, csrf };
-  assert.equal((await call('/admin', { raw: true })).status, 200);
-  const adminPage = await (await call('/admin', { raw: true })).text();
-  assert.match(adminPage, /portal\.js/);
+  const adminRedirect = await fetch(base + '/admin', { redirect: 'manual' });
+  assert.equal(adminRedirect.status, 302);
+  assert.equal(adminRedirect.headers.get('location'), '/');
+  assert.match(await (await call('/', { raw: true })).text(), /portal\.js/);
   assert.equal((await call('/portal.js', { raw: true })).status, 200);
   for (const page of ['/settings', '/admin/settings', '/market', '/workspaces']) { const r = await call(page, { raw: true }); assert.equal(r.status, 200); assert.match(await r.text(), /team.js/); }
 
   const member = { email: 'portal@example.com', password: 'portal-password-123' };
   assert.equal((await call('/api/admin/members', { method: 'POST', body: member })).status, 201);
   cookie = ''; csrf = '';
-  // 成员走管理员入口：拒绝（密码正确之后才告知原因）
-  const wrongPortal = await call('/api/auth/login', { method: 'POST', body: { ...member, portal: 'admin' } });
-  assert.equal(wrongPortal.status, 403);
-  assert.match(wrongPortal.data.error, /不是管理员/);
-  assert.equal(cookie, '', '被拒绝时不能发会话');
-  // 管理员走成员入口：拒绝
-  const adminAtMember = await call('/api/auth/login', { method: 'POST', body: { ...ADMIN, portal: 'member' } });
-  assert.equal(adminAtMember.status, 403);
-  assert.match(adminAtMember.data.error, /\/admin/);
-  // 密码错误始终是同一个泛化提示，不泄露角色
-  assert.equal((await call('/api/auth/login', { method: 'POST', body: { email: member.email, password: 'wrong-password-123', portal: 'admin' } })).status, 401);
-  // 入口匹配时正常登录；不带 portal 的旧调用方式保持兼容
-  assert.equal((await call('/api/auth/login', { method: 'POST', body: { ...member, portal: 'member' } })).status, 200);
-  const memberAuth = { cookie, csrf: (await call('/api/auth/session')).data.csrfToken };
+  // 身份只由账号决定：不管页面传不传 portal（旧版页面会传），成员和管理员都能登录
+  assert.equal((await call('/api/auth/login', { method: 'POST', body: { ...member, portal: 'admin' } })).status, 200);
   cookie = ''; csrf = '';
-  assert.equal((await call('/api/auth/login', { method: 'POST', body: { ...ADMIN, portal: 'admin' } })).status, 200);
+  const adminAtMember = await call('/api/auth/login', { method: 'POST', body: { ...ADMIN, portal: 'member' } });
+  assert.equal(adminAtMember.status, 200);
+  assert.equal((await call('/api/auth/session')).data.role, 'admin');
+  cookie = ''; csrf = '';
+  // 密码错误始终是同一个泛化提示，不泄露角色
+  assert.equal((await call('/api/auth/login', { method: 'POST', body: { email: member.email, password: 'wrong-password-123' } })).status, 401);
+  assert.equal((await call('/api/auth/login', { method: 'POST', body: member })).status, 200);
+  const memberAuth = { cookie, csrf: (await call('/api/auth/session')).data.csrfToken };
+  assert.equal((await call('/api/auth/session')).data.role, 'member');
+  cookie = ''; csrf = '';
+  assert.equal((await call('/api/auth/login', { method: 'POST', body: ADMIN })).status, 200);
   cookie = ''; csrf = '';
 
   // 站点名称与公告：未登录可读，只有管理员能改

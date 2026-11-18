@@ -11,13 +11,15 @@ const read = file => readFileSync(path.join(root, file), 'utf8');
 test('pwa.js：在桌面客户端里不显示“安装客户端”提醒 / 下载按钮 / Service Worker', () => {
   const src = read('public/pwa.js');
   assert.match(src, /const IN_APP = Boolean\(window\.yumeiroApp\)/); assert.match(src, /in-desktop-app/);
-  assert.match(src, /!IN_APP && 'serviceWorker' in navigator/); assert.match(src, /if \(!IN_APP\) showReminder\(\)/);
-  assert.match(src, /!IN_APP && !document\.getElementById\('clientGuideButton'\)/); assert.match(src, /!IN_APP && deferred/);
+  assert.match(src, /!IN_APP && 'serviceWorker' in navigator/);
+  assert.match(src, /!IN_APP && !document\.getElementById\('clientGuideButton'\)/);
+  // 不再有盖住聊天框的底部提醒条，也不再有和 ⬇ 重复的 📲 安装按钮（安装入口收在 ⬇ 的引导里）
+  assert.doesNotMatch(src, /showReminder|clientReminder|installButton/);
 });
 
 test('pwa.js：el() 必须真正绑定 on:{click}，否则“安装 / 下载”和 × 都点不动', () => {
   const src = read('public/pwa.js');
-  const el = src.slice(src.indexOf('const el ='), src.indexOf('const DISMISSED'));
+  const el = src.slice(src.indexOf('const el ='), src.indexOf('const IN_APP'));
   assert.match(el, /key === 'on'/, 'el() 要识别 on 属性');
   assert.match(el, /addEventListener\(name, handler\)/, 'on 里的处理函数要用 addEventListener 绑定');
   assert.doesNotMatch(el, /Object\.assign\(document\.createElement/, '不能再把 on 当普通属性赋值给节点');

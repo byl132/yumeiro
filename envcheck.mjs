@@ -29,7 +29,7 @@ export const VENDOR_HOSTS = {
 export const usesProxy = vendor => Boolean(vendor && VENDORS[vendor]?.proxy);
 // 参考清单（以各家官方“支持的国家和地区”页面为准，管理员可在页面里修改）
 export const DEFAULT_RESTRICTED = ['CN', 'HK', 'MO', 'RU', 'BY', 'IR', 'KP', 'SY', 'CU'];
-export const DEFAULT_GUARD = { enabled: true, restricted: DEFAULT_RESTRICTED, hourlyLimit: 40, maxConcurrent: 3, proxyUrl: '' };
+export const DEFAULT_GUARD = { enabled: true, restricted: DEFAULT_RESTRICTED, hourlyLimit: 40, maxConcurrent: 3, proxyUrl: '', cleanipKey: '', cleanipEnabled: false };
 
 export const vendorOfUrl = url => {
   let host = ''; try { host = new URL(url).hostname.toLowerCase(); } catch { return null; }
@@ -46,9 +46,14 @@ export function normalizeGuard(input = {}) {
     enabled: base.enabled !== false, restricted,
     hourlyLimit: Math.min(10000, Math.max(1, Math.floor(Number(base.hourlyLimit)) || DEFAULT_GUARD.hourlyLimit)),
     maxConcurrent: Math.min(50, Math.max(1, Math.floor(Number(base.maxConcurrent)) || DEFAULT_GUARD.maxConcurrent)),
-    proxyUrl: validProxyUrl(base.proxyUrl) ? String(base.proxyUrl).trim() : ''
+    proxyUrl: validProxyUrl(base.proxyUrl) ? String(base.proxyUrl).trim() : '',
+    cleanipKey: validCleanipKey(base.cleanipKey) ? String(base.cleanipKey).trim() : '',
+    cleanipEnabled: [true, 'true', 1, '1'].includes(base.cleanipEnabled)
   };
 }
+// CleanIP（https://cleanip.io）的密钥以 cip_ 开头，在 cleanip.io/account 免费创建
+export const validCleanipKey = value => /^cip_[A-Za-z0-9_-]{8,128}$/.test(String(value || '').trim());
+export const maskCleanipKey = value => validCleanipKey(value) ? String(value).slice(0, 4) + '••••' + String(value).slice(-4) : '';
 export function validProxyUrl(value) {
   if (!value) return false;
   try { const url = new URL(String(value).trim()); return url.protocol === 'http:' || url.protocol === 'https:'; } catch { return false; }
@@ -89,11 +94,73 @@ export async function detectEgress({ fetchFn = fetch, timeoutMs = 6000, extended
   return result;
 }
 
+// ---- CleanIP：IP 纯净度（0–100，越高越干净，等级 A+ 到 F）、IP 类型、VPN / 代理 / 机房 / Tor 标记 ----
+// CleanIP 只提供 MCP（Streamable HTTP）接口：POST https://cleanip.io/mcp，Authorization: Bearer cip_xxx，调用工具 check_ip。
+// 免费账号每天 20 个不同 IP，同一个 IP 当天重复查不另算（服务端对同一出口 IP 还会缓存几小时）。没有密钥时只返回地区和 ASN。
+const asArray = value => Array.isArray(value) ? value : value == null ? [] : [value];
+const pickText = item => typeof item === 'string' ? item : item && typeof item === 'object' ? String(item.label || item.name || item.text || item.flag || item.key || item.reason || '') : '';
+const num = value => { const n = typeof value === 'string' && value.trim() !== '' ? Number(value) : value; return typeof n === 'number' && Number.isFinite(n) ? n : null; };
+// 容错解析：字段名以官方返回为准，这里同时接受几种常见写法，认不出的字段忽略（不会因此报错）
+export function parseCleanIp(data) {
+  const d = data && typeof data === 'object' ? data : {};
+  const cip = d.cleanip && typeof d.cleanip === 'object' ? d.cleanip : {};
+  const score = [d.cleanip_score, cip.score, d.score, d.clean_score].map(num).find(v => v !== null) ?? null;
+  const grade = String(d.cleanip_grade ?? d.grade ?? cip.grade ?? '').trim();
+  const typeRaw = d.ip_type ?? d.type ?? cip.ip_type ?? cip.type ?? d.network?.type;
+  const type = pickText(typeRaw);
+  const flagBox = [d, d.flags, d.risk, d.risks, d.risk_flags].filter(x => x && typeof x === 'object' && !Array.isArray(x));
+  const truthy = (...names) => flagBox.some(box => names.some(name => box[name] === true));
+  const flagList = [d.risk_flags, d.flags, d.risks, d.risk].flatMap(asArray).map(pickText).filter(Boolean);
+  const hasFlag = re => flagList.some(text => re.test(text));
+  const vpn = truthy('vpn', 'is_vpn') || hasFlag(/vpn/i);
+  const proxy = truthy('proxy', 'is_proxy') || hasFlag(/proxy|代理/i);
+  const tor = truthy('tor', 'is_tor') || hasFlag(/\btor\b/i);
+  const hosting = truthy('hosting', 'is_hosting', 'datacenter', 'is_datacenter') || hasFlag(/hosting|datacenter|data center|idc|机房|数据中心/i) || /hosting|datacenter|机房|数据中心/i.test(type);
+  const nativeRaw = d.native ?? d.is_native ?? cip.native;
+  const scenarios = d.scenario_scores ?? d.scenarios ?? cip.scenarios;
+  return {
+    ok: true, keyless: score === null && !type && !flagList.length && !vpn && !proxy && !tor,
+    score, grade, type, vpn, proxy, tor, hosting, native: typeof nativeRaw === 'boolean' ? nativeRaw : null,
+    flags: [...new Set(flagList)].slice(0, 12),
+    deductions: asArray(d.deductions ?? d.score_deductions ?? cip.deductions).map(pickText).filter(Boolean).slice(0, 8),
+    scenarios: scenarios && typeof scenarios === 'object' && !Array.isArray(scenarios) ? Object.fromEntries(Object.entries(scenarios).map(([k, v]) => [k, num(v)]).filter(([, v]) => v !== null).slice(0, 8)) : null,
+    country: String(d.location?.country_code || '').toUpperCase(), asn: d.network?.asn ?? null, asName: String(d.network?.as_name || ''), isp: String(d.network?.isp || ''),
+    reportUrl: String(d.report_url || ''), error: ''
+  };
+}
+export async function detectCleanIp({ ip, key, fetchFn = fetch, timeoutMs = 10000 } = {}) {
+  const fail = error => ({ ok: false, score: null, grade: '', type: '', vpn: false, proxy: false, tor: false, hosting: false, native: null, flags: [], deductions: [], scenarios: null, country: '', asn: null, asName: '', isp: '', reportUrl: '', keyless: false, error });
+  if (!ip) return fail('还没有拿到出口 IP');
+  if (!validCleanipKey(key)) return fail('CleanIP 密钥格式不对（应以 cip_ 开头）');
+  try {
+    const response = await fetchFn('https://cleanip.io/mcp', {
+      method: 'POST', redirect: 'error', signal: AbortSignal.timeout(timeoutMs),
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', Authorization: 'Bearer ' + String(key).trim() },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'check_ip', arguments: { ip } } })
+    });
+    if (response.status === 401 || response.status === 403) return fail('CleanIP 密钥无效或已被停用');
+    if (response.status === 429) return fail('CleanIP 额度已用完（免费账号每天 20 个不同 IP）');
+    if (!response.ok) return fail('CleanIP 返回 HTTP ' + response.status);
+    let text = await response.text();
+    if (/^\s*(event|data):/m.test(text)) text = text.split('\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).trim()).filter(Boolean).pop() || '';
+    const rpc = JSON.parse(text);
+    if (rpc.error) return fail('CleanIP：' + String(rpc.error.message || rpc.error.code || '出错').slice(0, 120));
+    const result = rpc.result || {};
+    let data = result.structuredContent;
+    if (!data) { const raw = asArray(result.content).map(c => c?.text).find(Boolean); try { data = JSON.parse(raw); } catch { data = null; } }
+    if (result.isError || !data) return fail('CleanIP：' + String(asArray(result.content).map(c => c?.text).find(Boolean) || '没有返回数据').slice(0, 120));
+    const parsed = parseCleanIp(data);
+    if (parsed.keyless) return { ...parsed, ok: false, error: 'CleanIP 没有返回纯净度数据（密钥可能未生效）' };
+    return parsed;
+  } catch (error) { return fail('无法连接 CleanIP：' + (error?.name === 'TimeoutError' ? '超时' : String(error?.cause?.code || error?.message || '').slice(0, 80))); }
+}
+
 const rank = { ok: 0, warn: 1, danger: 2 };
 const worst = (a, b) => rank[b] > rank[a] ? b : a;
 
 // 综合评估。input: {egress, probes, guard, usage:{claude:{lastHour,concurrent,users24h}, codex:{...}}, regionHistory:[country...]}
-export function evaluate({ egress, probes, guard, usage = {}, regionHistory = [] }) {
+export function evaluate({ egress, probes, guard, usage = {}, regionHistory = [], cleanip = null }) {
+  const ci = cleanip && cleanip.ok ? cleanip : null;
   const vendors = {};
   for (const vendor of Object.keys(VENDORS)) {
     const cfg = VENDORS[vendor], reasons = [], advice = []; let level = 'ok', block = false;
@@ -109,6 +176,18 @@ export function evaluate({ egress, probes, guard, usage = {}, regionHistory = []
     }
     if (cfg.account && egress?.hosting === true) add('warn', `出口是数据中心/托管 IP（${egress.isp || '未知运营商'}）`, '使用 API Key 通常没问题；若用 Claude Code / Codex 的“订阅账号登录”，数据中心 IP 更容易触发风控，建议登录与使用保持在同一稳定出口。');
     if (cfg.regions && egress?.proxy === true) add('warn', '出口被识别为代理/VPN', '共享代理 IP 信誉不稳定，建议使用独享、固定的出口。');
+    if (ci && (cfg.regions || cfg.account)) {
+      if (ci.score !== null) {
+        const label = `CleanIP 纯净度 ${ci.score}${ci.grade ? '（' + ci.grade + '）' : ''}${ci.type ? ' · ' + ci.type : ''}`;
+        if (ci.score < 40) add('danger', label + '，很低', '这个出口 IP 信誉很差（常见于被滥用的共享机房 / 代理 IP）。建议换成独享、固定的出口；这条只提示，不会单独拦截请求。');
+        else if (ci.score < 60) add('warn', label + '，偏低', '出口 IP 信誉偏低，官方风控更容易给出验证或限流。建议换更干净的出口。');
+        else if (ci.score < 80 && cfg.account) add('warn', label + '，一般', '用订阅账号登录 Claude Code / Codex 时，建议用更干净的独享出口。');
+        else reasons.push({ level: 'ok', text: label });
+      }
+      if ((ci.tor || ci.vpn || ci.proxy) && egress?.proxy !== true) add('warn', 'CleanIP 把出口标记为 ' + [ci.tor && 'Tor', ci.vpn && 'VPN', ci.proxy && '代理'].filter(Boolean).join(' / '), '共享的匿名出口信誉不稳定，建议使用独享、固定的出口。');
+      if (cfg.account && ci.hosting && egress?.hosting !== true) add('warn', 'CleanIP 把出口识别为数据中心/托管 IP' + (ci.asName ? '（' + ci.asName + '）' : ''), '使用 API Key 通常没问题；若用订阅账号登录，建议改用住宅或独享的出口。');
+      if (cfg.regions && ci.country && country && ci.country !== country) add('warn', `多个来源对出口地区的判断不一致（Cloudflare：${country}；CleanIP：${ci.country}）`, '出口可能经过中转或 IP 库有延迟，请以官方“支持的国家和地区”为准人工核对。');
+    }
     const distinct = new Set(regionHistory.filter(Boolean));
     if (cfg.regions && distinct.size >= 3) add('warn', `过去 24 小时出口地区变化了 ${distinct.size} 个（${[...distinct].join('、')}）`, '频繁更换出口地区是常见的风控信号。请固定出口，不要来回切换。');
     const u = usage[vendor] || {};
@@ -121,5 +200,44 @@ export function evaluate({ egress, probes, guard, usage = {}, regionHistory = []
     vendors[vendor] = { name: VENDOR_NAMES[vendor], engine: cfg.rate, level, block: guard.enabled && block, reasons, advice: [...new Set(advice)], probes: mine };
   }
   const level = Object.values(vendors).reduce((acc, v) => worst(acc, v.level), 'ok');
-  return { at: Date.now(), level, egress, vendors };
+  const verdict = judge({ egress, probes, guard, usage, regionHistory, cleanip: ci, vendorsLevel: level });
+  return { at: Date.now(), level, egress, vendors, cleanip: cleanip ? { ...cleanip } : null, verdict };
+}
+
+// ---- 系统综合研判：把多个来源的信号合成一个 0–100 的分数和一份可解释的依据 ----
+// 来源：Cloudflare（出口 IP、地区）、ip-api（运营商、机房/代理）、CleanIP（纯净度、类型、标记）、连通性探测、用量与出口地区变化。
+// 做法：先按本地信号从 100 分扣分；有 CleanIP 时与它的纯净度各占一半；多个来源互相矛盾（如地区不一致）再扣分。
+// 它只给出判断和理由，真正“拒绝请求”仍只由受限地区、调用频率、并发这三条硬规则决定。
+export function judge({ egress, probes = [], guard, usage = {}, regionHistory = [], cleanip = null, vendorsLevel = 'ok' }) {
+  const factors = []; let local = 100;
+  const hit = (source, text, delta) => { local += delta; factors.push({ source, text, delta }); };
+  const country = egress?.country || '';
+  if (!country) hit('Cloudflare', '无法确定出口所在地区', -10);
+  else if (guard.restricted.includes(country)) hit('Cloudflare', `出口在受限地区 ${country}`, -50);
+  const hosting = egress?.hosting === true || cleanip?.hosting === true, anonymous = egress?.proxy === true || cleanip?.vpn === true || cleanip?.proxy === true || cleanip?.tor === true;
+  if (hosting) hit(egress?.hosting === true ? 'ip-api' : 'CleanIP', '出口是数据中心 / 托管 IP', -8);
+  if (anonymous) hit(egress?.proxy === true ? 'ip-api' : 'CleanIP', '出口被识别为代理 / VPN / Tor', -15);
+  const guarded = probes.filter(p => VENDORS[p.vendor]?.regions);
+  const down = [...new Set(guarded.filter(p => !p.reachable).map(p => p.vendor))];
+  if (down.length) hit('连通性探测', `${down.map(v => VENDOR_NAMES[v]).join('、')} 的端点连不上`, -Math.min(25, 10 * down.length));
+  const challenged = guarded.filter(p => p.reachable && p.challenged);
+  if (challenged.length) hit('连通性探测', `${challenged.length} 个端点返回风控挑战 / 限流`, -Math.min(20, 8 * challenged.length));
+  const regions = new Set(regionHistory.filter(Boolean));
+  if (regions.size >= 3) hit('出口地区记录', `24 小时内出口地区变了 ${regions.size} 个`, -10);
+  const shared = Object.entries(VENDORS).some(([id, cfg]) => cfg.rate && (usage[id]?.users24h || 0) >= 2);
+  if (shared) hit('用量统计', '多个账号共用同一引擎', -10);
+  if (cleanip?.country && country && cleanip.country !== country) hit('多源对比', `Cloudflare 与 CleanIP 对出口地区的判断不一致（${country} / ${cleanip.country}）`, -10);
+  local = Math.max(0, Math.min(100, local));
+  let score = local;
+  const sources = ['Cloudflare', ...(egress?.isp || egress?.hosting != null ? ['ip-api'] : []), '连通性探测', '用量统计'];
+  if (cleanip && cleanip.score !== null) {
+    score = Math.round(local * 0.5 + cleanip.score * 0.5);
+    factors.unshift({ source: 'CleanIP', text: `IP 纯净度 ${cleanip.score}${cleanip.grade ? '（' + cleanip.grade + '）' : ''}，与本地信号各占一半`, delta: null });
+    sources.splice(1, 0, 'CleanIP');
+  }
+  const scoreLevel = score >= 75 ? 'ok' : score >= 50 ? 'warn' : 'danger';
+  const level = rank[vendorsLevel] > rank[scoreLevel] ? vendorsLevel : scoreLevel;
+  const grade = score >= 90 ? 'A' : score >= 80 ? 'B' : score >= 65 ? 'C' : score >= 50 ? 'D' : 'F';
+  const summary = level === 'ok' ? '出口环境良好，未发现明显风险' : level === 'warn' ? '出口环境存在需要关注的风险信号' : '出口环境风险较高，建议先处理再使用官方服务';
+  return { score, localScore: local, grade, level, summary, sources, factors };
 }
