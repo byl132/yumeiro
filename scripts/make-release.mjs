@@ -17,9 +17,10 @@ const args = process.argv.slice(2), opt = name => { const i = args.indexOf(name)
 const outDir = path.resolve(opt('--out') || path.join(root, '..')), clientsDir = opt('--clients');
 const version = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')).version;
 
-const SKIP_DIRS = new Set(['node_modules', 'data', 'secrets', '.git', 'logs', 'dist', 'build-tmp', '.gradle', '.kotlin']);
-const SKIP_PATHS = new Set(['clients/android/android', 'clients/android-native/app/build', 'brand/wallpapers']);                      // 生成的 android 工程；原始壁纸（成品已在 public/seed/wallpapers）
-const SKIP_FILES = /^(local\.properties|\.env|_.*\.mjs|.*\.zip|.*\.cshare|.*\.bak|.*\.log)$/;
+// 注意：`data` 只跳过项目根目录的运行数据；安卓客户端的源码包 org/yumeiro/app/data（里面有 Api.kt）必须打进去。
+const SKIP_DIRS = new Set(['node_modules', 'secrets', '.git', 'logs', 'dist', 'build-tmp', '.gradle', '.kotlin', '.cindy-worktrees', '.cloudbase-demo']);
+const SKIP_PATHS = new Set(['data', 'clients/android/android', 'clients/android-native/app/build', 'brand/wallpapers']);                      // 运行数据；生成的 android 工程；原始壁纸（成品已在 public/seed/wallpapers）
+const SKIP_FILES = /^(local\.properties|\.env|\.git|_.*\.mjs|.*\.zip|.*\.cshare|.*\.bak|.*\.log)$/;
 const EXEC = /\.sh$/;
 
 async function collect(dir, prefix = '') {

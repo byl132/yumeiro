@@ -19,8 +19,9 @@ test('发布包：包含部署需要的文件、不含 node_modules / data / sec
     const lean = readZip(await readFile(path.join(out, `Yumeiro-${version}.zip`))), full = readZip(await readFile(path.join(out, `Yumeiro-${version}-with-clients.zip`)));
     const names = lean.entries.map(e => e.name);
     for (const must of ['Yumeiro/server.mjs', 'Yumeiro/Dockerfile', 'Yumeiro/install.sh', 'Yumeiro/deploy/yumeiro-native.sh', 'Yumeiro/public/index.html', 'Yumeiro/public/side.js', 'Yumeiro/public/seed/wallpapers/rooftop-night.png', 'Yumeiro/scripts/install-clients.mjs', 'Yumeiro/.env.example', 'Yumeiro/安装说明.md', 'Yumeiro/客户端安装包上传说明.md', 'Yumeiro/runner/runner.mjs']) assert.ok(names.includes(must), '发布包缺少 ' + must);
-    for (const bad of [/(^|\/)node_modules\//, /^Yumeiro\/data\//, /(^|\/)secrets\//, /^Yumeiro\/\.env$/, /^Yumeiro\/\.git\//, /\/dist\//, /clients\/android\/android\//, /\.zip$/, /\.cshare$/, /^Yumeiro\/_/, /^Yumeiro\/logs\//, /brand\/wallpapers\//, /^Yumeiro\/public\/downloads\//])
+    for (const bad of [/(^|\/)node_modules\//, /^Yumeiro\/data\//, /(^|\/)secrets\//, /^Yumeiro\/\.env$/, /^Yumeiro\/\.git(\/|$)/, /^Yumeiro\/\.cindy-worktrees\//, /^Yumeiro\/\.cloudbase-demo\//, /\/dist\//, /clients\/android\/android\//, /\.zip$/, /\.cshare$/, /^Yumeiro\/_/, /^Yumeiro\/logs\//, /brand\/wallpapers\//, /^Yumeiro\/public\/downloads\//])
       assert.ok(!names.some(n => bad.test(n)), '发布包里不该有：' + bad + ' → ' + names.filter(n => bad.test(n)).slice(0, 3));
+    assert.ok(names.includes('Yumeiro/clients/android-native/app/src/main/java/org/yumeiro/app/data/Api.kt'), '安卓源码包 data/ 里的 Api.kt 必须在发布包里（只有项目根目录的 data/ 才是运行数据）');
     assert.deepEqual(lean.skipped, []);
     const fullNames = full.entries.map(e => e.name);
     assert.ok(fullNames.includes('Yumeiro/Yumeiro-Clients/Yumeiro-Setup-9.9.9.exe')); assert.ok(!fullNames.some(n => n.endsWith('notes.txt')), '只收符合命名格式的安装包');
