@@ -31,6 +31,7 @@ import { VISION_LIMITS, VISION_DIALECTS, DEFAULT_VISION_MODELS, DEFAULT_PROMPT, 
 import { REMOTE_LIMITS, OS_LABELS, newPairCode, normalizePairCode, cleanInputEvents, countEvents, isJpeg, cleanDeviceName } from './remote.mjs';
 import { RECOVERY, newRecoveryKey, normalizeRecoveryKey, passwordProblem, createLimiter, createPhoneStore } from './recover.mjs';
 import { PROJECT_LIMITS, PROJECT_DIR, MANIFEST_NAME, mimeOf, renderMarkdownPage, signPreview, verifyPreview, previewHeaders, previewPath, manifestFor, planImport, localKit, cleanGuideMessages, parseGuideReply, guidePrompt } from './project.mjs';
+import { requestSetupHelper } from './setup/setup-client.mjs';
 import { normalizeImageConfig, publicImageConfig, defaultImageConfig, imagesEndpoint, imageAuthHeaders, buildComfyWorkflow, comfyImageRefs, cleanImageRequest, buildImageRequest, parseImageResponse, sniffImage, safeResultUrl, DIALECTS as IMAGE_DIALECTS, BATCH_MODES, LIMITS as IMAGE_LIMITS } from './images.mjs';
 import { readPrefs, userMemories, upsertMemory, explicitRemember, selectMemories, relatedConversations, buildMemoryBlock, extractionMessages, parseExtraction, pendingSummaryRange, summaryMessages, cleanText, looksSecret, MEMORY_LIMITS } from './memory.mjs';
 await loadAsrExtras();
@@ -38,10 +39,31 @@ import { templates as providerTemplates, normalizeBaseUrl, chatEndpoint, slugify
 
 const scrypt=promisify(scryptCallback);
 const root=path.dirname(fileURLToPath(import.meta.url));
+const appVersion=(()=>{try{return JSON.parse(readFileSync(path.join(root,'package.json'),'utf8')).version||'未知'}catch{return '未知'}})();
+const updateSource='https://api.github.com/repos/yumeiro-ai/yumeiro/releases/latest';
+let updateCache={checkedAt:0,result:null};
+function compareVersions(a,b){const pa=String(a||'').replace(/^v/i,'').split('.').map(Number),pb=String(b||'').replace(/^v/i,'').split('.').map(Number);for(let i=0;i<3;i++){const d=(pa[i]||0)-(pb[i]||0);if(d)return d}return 0}
+async function latestServiceUpdate(){
+  if(updateCache.result&&Date.now()-updateCache.checkedAt<10*60*1000)return updateCache.result;
+  try{
+    const response=await fetch(updateSource,{headers:{Accept:'application/vnd.github+json','User-Agent':'Yumeiro-Service-Update-Checker'},signal:AbortSignal.timeout(8000),redirect:'error'});
+    if(!response.ok)throw new Error('HTTP '+response.status);
+    const release=await response.json();
+    const latest=String(release.tag_name||'').replace(/^v/i,'');
+    if(!/^\d+\.\d+\.\d+(?:[-+].*)?$/.test(latest))throw new Error('invalid release version');
+    const result={currentVersion:appVersion,latestVersion:latest,updateAvailable:compareVersions(latest,appVersion)>0,releaseUrl:String(release.html_url||''),publishedAt:release.published_at||null,checkedAt:Date.now(),source:'GitHub Releases'};
+    updateCache={checkedAt:Date.now(),result};return result;
+  }catch(error){
+    const result={currentVersion:appVersion,latestVersion:null,updateAvailable:false,releaseUrl:'',publishedAt:null,checkedAt:Date.now(),source:'GitHub Releases',error:'暂时无法检查更新：'+(error.name==='TimeoutError'?'连接超时':'发布源不可达')};
+    updateCache={checkedAt:Date.now(),result};return result;
+  }
+}
 const dataDir=process.env.DATA_DIR||path.join(root,'data');
 const port=Number(process.env.PORT||8787);
 const sessionMs=7*24*60*60*1000;
+const setupSessionMs=15*60*1000;
 const cookieSecure=process.env.COOKIE_SECURE!=='false';
+const setupTokenFile=process.env.SETUP_TOKEN_FILE||'';
 const storeKey=await readSecretKey();
 const modelBase=(process.env.MODEL_BASE_URL||'').replace(/\/+$/,'');
 const modelKey=process.env.MODEL_API_KEY_FILE
@@ -160,21 +182,33 @@ async function verifyPassword(password,saved){
 }
 const sha=value=>createHash('sha256').update(value).digest('hex');
 const persist=()=>storage.save(db);
+let setupMode=false;
+let setupTokenDigest='';
+const setupSessions=new Map(),setupAttempts=new Map();
+const setupJob={id:null,state:'pending',startedAt:null,completedAt:null,actions:{}};
 if(storage.fresh||storage.legacyPlaintext){
   await persist();
   console.log('Store is encrypted at rest.');
 }
 if(!Object.keys(db.users).length){
+  const setupRaw=setupTokenFile?(await readFile(setupTokenFile,'utf8').catch(()=>'' )).trim():(process.env.SETUP_TOKEN||'').trim();
   const email=(process.env.ADMIN_EMAIL||'').trim().toLowerCase();
-  // 管理员初始密码可放在 ADMIN_PASSWORD_FILE（推荐，安装脚本使用）或 ADMIN_PASSWORD；仅在库里还没有任何账号时读取。
   const password=process.env.ADMIN_PASSWORD_FILE?(await readFile(process.env.ADMIN_PASSWORD_FILE,'utf8').catch(()=>'')).trim():(process.env.ADMIN_PASSWORD||'');
-  if(!email||password.length<16||/^(change|replace|your-)/i.test(password)){
-    throw new Error('数据库里还没有管理员账号：请先运行 ./install.sh 完成安装设置，或手动设置 ADMIN_EMAIL 与至少 16 位的 ADMIN_PASSWORD_FILE / ADMIN_PASSWORD（不能是示例值）。');
+  if(setupRaw){
+    if(setupRaw.length<32)throw new Error('SETUP_TOKEN 必须至少 32 个字符');
+    setupMode=true;setupTokenDigest=sha(setupRaw);db.settings.setup||={status:'pending'};
+    setupJob.state=db.settings.setup.status||'pending';setupJob.id=db.settings.setup.jobId||null;
+    if(setupJob.state==='running')setupJob.state='failed';
+    if(db.settings.setup.status==='completed')setupMode=false;
+    console.log('等待网页安装向导完成首次安装：/setup');
+  }else if(email&&password.length>=16&&!/^(change|replace|your-)/i.test(password)){
+    const id=randomUUID();
+    db.users[id]={id,email,passwordHash:await hashPassword(password),role:'admin',authType:'local',createdAt:Date.now()};
+    await persist();
+    console.log('已初始化管理员账号：'+email);
+  }else{
+    throw new Error('数据库里还没有管理员账号：请先运行 ./install.sh 完成安装设置，或配置 SETUP_TOKEN_FILE 后访问 /setup，或手动设置 ADMIN_EMAIL 与至少 16 位的 ADMIN_PASSWORD_FILE / ADMIN_PASSWORD（不能是示例值）。');
   }
-  const id=randomUUID();
-  db.users[id]={id,email,passwordHash:await hashPassword(password),role:'admin',authType:'local',createdAt:Date.now()};
-  await persist();
-  console.log('已初始化管理员账号：'+email);
 }
 function json(res,status,value){
   res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
@@ -333,6 +367,89 @@ async function issueAppSession(res,user){
   db.sessions[tokenHash]={userId:user.id,csrfToken,expiresAt:Date.now()+sessionMs,createdAt:Date.now()};
   await persist();setCookie(res,token,Math.floor(sessionMs/1000));
   return {authenticated:true,...safeUser(user),csrfToken};
+}
+function setupAvailable(){return setupMode&&!Object.values(db.users).some(user=>user.role==='admin')&&db.settings.setup?.status!=='completed'}
+function setupCookie(res,token,age){res.setHeader('Set-Cookie','ym_setup='+encodeURIComponent(token)+'; Path=/api/setup; HttpOnly; SameSite=Strict; Max-Age='+age+(cookieSecure?'; Secure':''))}
+function setupCookieValue(req){return cookieValue(req,'ym_setup')}
+function setupSession(req){
+  const token=setupCookieValue(req),record=token&&setupSessions.get(sha(token));
+  if(!record||record.expiresAt<Date.now()){if(record)setupSessions.delete(sha(token));return null}
+  return record;
+}
+function setupRateLimited(req,key){
+  const id=clientIp(req)+'|'+key,now=Date.now(),items=(setupAttempts.get(id)||[]).filter(at=>now-at<15*60*1000);
+  if(items.length>=8){setupAttempts.set(id,items);return true}
+  items.push(now);setupAttempts.set(id,items);return false;
+}
+function setupError(res,status,error){return json(res,status,{error})}
+function setupPublicStatus(){
+  const raw=name=>setupJob.actions[name]?.status||'pending',message=name=>setupJob.actions[name]?.message||'等待执行';
+  const actions=[
+    ['test_postgres','PostgreSQL 连接测试'],['configure_installation','写入服务器与模型配置'],['test_model','模型可用性验证'],['install_node','Node.js 22+（检查运行环境）'],['install_build_tools','编译器与构建工具（系统安装）'],['install_runner','Yumeiro Runner（启用服务）'],
+    ['install_claude','Claude Code（npm 全局安装）'],['install_codex','Codex（npm 全局安装）'],['install_pi','Pi（npm 全局安装）'],['install_clients','Yumeiro 客户端包（发布下载）'],['install_cindy_desktop','Cindy 桌面容器（Docker 启动）']
+  ];
+  return {available:setupAvailable(),state:db.settings.setup?.status||'pending',jobId:setupJob.id,profile:'selectable',actions:actions.map(([key,name])=>({name,status:raw(key),message:message(key)}))};
+}
+function cleanSetupConfig(value={}){
+  const config={domain:String(value.domain||'').trim().toLowerCase(),port:Number(value.port||8787),transport:['proxy','http','https'].includes(value.transport)?value.transport:'proxy',storage:value.storage==='postgres'?'postgres':'json',pgUrl:String(value.pgUrl||'').trim(),modelUrl:String(value.modelUrl||'').trim(),modelName:String(value.modelName||'').trim(),modelKey:String(value.modelKey||''),desktopRegion:value.desktopRegion==='cn'?'cn':'global',desktopVersion:'latest'};
+  if(config.domain&&!/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(config.domain))throw new Error('域名格式无效');
+  if(!Number.isInteger(config.port)||config.port<1024||config.port>65535)throw new Error('端口必须是 1024 到 65535');
+  if(config.storage==='postgres'){if(!config.pgUrl||!/^postgres(?:ql)?:\/\//i.test(config.pgUrl)||config.pgUrl.length>2000)throw new Error('PostgreSQL 连接地址无效');}
+  else config.pgUrl='';
+  if(config.modelUrl)config.modelUrl=normalizeBaseUrl(config.modelUrl);
+  if(config.modelName.length>200||config.modelKey.length>500)throw new Error('模型配置过长');
+  return config;
+}
+async function runSetupJob(options){
+  const jobId=setupJob.id;setupJob.state='running';db.settings.setup={...(db.settings.setup||{}),status:'running',jobId,startedAt:Date.now()};await persist();
+  const selected=options.components||{};
+  const names={node:'install_node',buildTools:'install_build_tools',runner:'install_runner',claude:'install_claude',codex:'install_codex',pi:'install_pi',clients:'install_clients',desktop:'install_cindy_desktop'};
+  const actions=[];
+  for(const key of Object.keys(names)){
+    if(selected[key]!==false){
+      actions.push(key==='claude'||key==='codex'||key==='pi'?{action:'install_engine',engine:key}:key==='desktop'?{action:'install_cindy_desktop'}:{action:key==='clients'?'install_clients':key==='node'?'install_node':key==='buildTools'?'install_build_tools':'install_runner'});
+    }else setupJob.actions[names[key]]={status:'skipped',message:'用户未选择'};
+  }
+  try{
+    if(options.config.storage==='postgres'){
+      setupJob.actions.test_postgres={status:'running',message:'正在测试 PostgreSQL 连接'};
+      try{const tested=await requestSetupHelper({action:'test_postgres',registry:options.registry,jobId,config:options.config});setupJob.actions.test_postgres={status:'completed',message:tested?.message||'连接测试通过'}}catch(error){setupJob.actions.test_postgres={status:'failed',message:'PostgreSQL 连接测试失败'};throw error}
+    }else setupJob.actions.test_postgres={status:'skipped',message:'未选择 PostgreSQL'};
+    setupJob.actions.configure_installation={status:'running',message:'正在写入服务器与模型配置'};
+    try{await requestSetupHelper({action:'configure_installation',registry:options.registry,jobId,config:options.config});setupJob.actions.configure_installation={status:'completed',message:options.config.modelName?'模型与服务器配置已写入秘密文件':'初始化配置已保存'};}catch(error){setupJob.actions.configure_installation={status:'failed',message:'初始化配置失败'};throw error}
+    for(const item of actions){
+      const actionKey=item.action==='install_engine'?names[item.engine]:item.action;
+      setupJob.actions[actionKey]={status:'running',message:{install_node:'正在检查 Node.js 22+',install_build_tools:'正在安装编译器与构建工具',install_runner:'正在启用 Yumeiro Runner',install_claude:'正在安装 Claude Code',install_codex:'正在安装 Codex',install_pi:'正在安装 Pi',install_clients:'正在发布客户端安装包',install_cindy_desktop:'正在启动 Cindy 桌面容器'}[actionKey]||'正在执行固定安装步骤'};
+      try{
+        const result=await requestSetupHelper({action:item.action,engine:item.engine,registry:options.registry,jobId,config:options.config});
+        setupJob.actions[actionKey]={status:'completed',message:result?.message||'已完成',details:result?.details||{}};
+      }catch(error){setupJob.actions[actionKey]={status:'failed',message:'安装步骤失败'};throw error}
+    }
+    const hasModelConfig=Boolean(options.config.modelUrl||options.config.modelName||options.config.modelKey);
+    if(!hasModelConfig){
+      setupJob.actions.test_model={status:'skipped',message:'未配置模型，跳过可用性验证'};
+    }else if(!options.config.modelUrl||!options.config.modelName){
+      setupJob.actions.test_model={status:'failed',message:'模型验证失败：模型服务地址和模型名称必须同时配置'};
+      throw new Error('model configuration incomplete');
+    }else{
+      setupJob.actions.test_model={status:'running',message:'正在验证模型地址、API Key 和模型名称'};
+      const checked=await probeProvider({baseUrl:options.config.modelUrl,apiKey:options.config.modelKey,model:options.config.modelName});
+      if(!checked.ok){
+        const detail=String(checked.detail||'模型服务不可用');
+        const item=/HTTP 401|HTTP 403/.test(detail)?'API Key':/HTTP 404/.test(detail)?'模型服务地址或模型名称':/超时|无法连接/.test(detail)?'模型服务地址':'模型名称或 API Key';
+        setupJob.actions.test_model={status:'failed',message:'模型验证失败：请检查'+item+'。'+detail};
+        throw new Error('model availability check failed');
+      }
+      setupJob.actions.test_model={status:'completed',message:'模型验证通过：地址、API Key 和模型名称可用'};
+    }
+    const email=options.email,password=options.password;
+    if(Object.keys(db.users).length)throw new Error('管理员账号已存在，安装已锁定');
+    const user={id:randomUUID(),email,passwordHash:await hashPassword(password),displayName:options.displayName||email,role:'admin',authType:'local',createdAt:Date.now()};
+    db.users[user.id]=user;db.settings.setup={...(db.settings.setup||{}),status:'completed',completedAt:Date.now(),jobId};setupJob.state='completed';setupJob.completedAt=Date.now();await persist();
+    setupMode=false;setupSessions.clear();return user;
+  }catch(error){
+    setupJob.state='failed';db.settings.setup={...(db.settings.setup||{}),status:'failed',jobId,errorCode:'ACTION_FAILED'};await persist();throw error;
+  }
 }
 const safeCindyAccount=account=>({id:account.id,region:account.region,displayName:account.displayName,email:account.email,kind:account.kind,role:account.role,orgName:account.orgName,boundAt:account.boundAt,shared:Boolean(account.shared),accessExpiresAt:tokenExpiry(account.credentials?.accessToken),refreshAvailable:Boolean(account.credentials?.refreshToken)});
 // 绑定用的接口都要求先登录本站账号（写请求同时校验 CSRF）。
@@ -954,9 +1071,14 @@ async function runEngineInner({engine,prompt,workspaceId,mode,system,model,gatew
   const usage=end.usage&&(end.usage.inputTokens!=null||end.usage.outputTokens!=null)?{inputTokens:end.usage.inputTokens??null,outputTokens:end.usage.outputTokens??null,totalTokens:(end.usage.inputTokens||0)+(end.usage.outputTokens||0)}:null;
   return {text:(end.final||text||'').trim(),usage};
 }
+const workspaceVisibility=workspace=>{const value=workspace?.visibility;if(['private','members','team','public'].includes(value))return value;return Array.isArray(workspace?.memberIds)&&workspace.memberIds.length?'members':'private'};
 const workspaceFor=(id,user)=>{
-  const workspace=db.workspaces[id];
-  return workspace&&(user.role==='admin'||workspace.ownerId===user.id||workspace.memberIds.includes(user.id))?workspace:null;
+  const workspace=db.workspaces[id];if(!workspace||!user||user.disabled)return null;
+  if(user.role==='admin'||workspace.ownerId===user.id)return workspace;
+  const visibility=workspaceVisibility(workspace);
+  if(visibility==='members')return Array.isArray(workspace.memberIds)&&workspace.memberIds.includes(user.id)?workspace:null;
+  if(visibility==='team'||visibility==='public')return workspace;
+  return null;
 };
 // ---- 工作区文件管理：版本备份、过期清理（文件在运行器里，备份逻辑见 runner/filestore.mjs）----
 const retentionOf=workspace=>({days:Number(workspace.retention?.days)||0,autoDelete:Boolean(workspace.retention?.autoDelete&&workspace.retention?.days),protect:Array.isArray(workspace.retention?.protect)?workspace.retention.protect:[],autoEnabledBy:workspace.retention?.autoEnabledBy||null,autoEnabledAt:workspace.retention?.autoEnabledAt||null});
@@ -1000,7 +1122,14 @@ async function autoCleanup(){
   }
 }
 const canManageWorkspace=(workspace,user)=>user.role==='admin'||workspace.ownerId===user.id;
-const safeWorkspace=(workspace,user)=>({id:workspace.id,name:workspace.name,createdAt:workspace.createdAt,mine:workspace.ownerId===user.id,owner:db.users[workspace.ownerId]?.email||null,members:workspace.memberIds.map(id=>db.users[id]?.email).filter(Boolean)});
+const workspaceMemberDetails=workspace=>(workspace.memberIds||[]).map(id=>db.users[id]).filter(user=>user&&!user.disabled).map(user=>({id:user.id,email:user.email,displayName:user.displayName||user.email}));
+const safeWorkspace=(workspace,user)=>({id:workspace.id,name:workspace.name,createdAt:workspace.createdAt,visibility:workspaceVisibility(workspace),canManage:canManageWorkspace(workspace,user),mine:workspace.ownerId===user.id,owner:db.users[workspace.ownerId]?.email||null,members:(workspace.memberIds||[]).map(id=>db.users[id]?.email).filter(Boolean),memberDetails:workspaceMemberDetails(workspace)});
+function findWorkspaceMember(identifier,workspace){
+  const value=String(identifier||'').trim(),lower=value.toLowerCase();if(!value)return null;
+  if(db.users[value]&&db.users[value].role==='member'&&!db.users[value].disabled)return db.users[value];
+  const exact=Object.values(db.users).filter(user=>user.role==='member'&&!user.disabled&&(String(user.email||'').toLowerCase()===lower||String(user.displayName||'').trim().toLowerCase()===lower));
+  return exact.length===1?exact[0]:null;
+}
 const runSummary=run=>({id:run.id,task:run.task.slice(0,120),mode:run.mode,status:run.status,createdAt:run.createdAt,endedAt:run.endedAt||null,participants:run.participants,userEmail:db.users[run.userId]?.email||null});
 // 把请求里的参与者解析成可执行的描述；任何不可用的引用都在开始前报错，而不是跑到一半才失败。
 // Cindy 托管模型 + 引擎：引擎直接用网关的地址和密钥。只有目录里声明支持该引擎的模型才行（Pi 例外，所有网关模型都可用）。
@@ -1281,6 +1410,9 @@ async function handleBot(req,res,pathname){
 // 仅按白名单提供 public 下的静态文件，不拼接请求路径，避免目录穿越。
 const staticFiles={
   '/index.html':{name:'index.html',type:'text/html; charset=utf-8',html:true},
+  '/setup':{name:'setup.html',type:'text/html; charset=utf-8',html:true},
+  '/setup.js':{name:'setup.js',type:'text/javascript; charset=utf-8'},
+  '/setup.css':{name:'setup.css',type:'text/css; charset=utf-8'},
   '/settings':{name:'index.html',type:'text/html; charset=utf-8',html:true},
   '/market':{name:'index.html',type:'text/html; charset=utf-8',html:true},
   '/workspaces':{name:'index.html',type:'text/html; charset=utf-8',html:true},
@@ -1928,6 +2060,7 @@ const server=http.createServer(async(req,res)=>{
       }
       if(pathname==='/admin'||pathname==='/admin/'){res.writeHead(302,{Location:'/','Cache-Control':'no-store'});return res.end()} // 旧的管理员登录地址：现在只有一个登录入口
       const file=INVITE_PAGE.test(pathname)?{name:'invite.html',type:'text/html; charset=utf-8',html:true}:staticFiles[pathname==='/'?'/index.html':pathname];
+      if(pathname==='/setup'&&!setupAvailable())return json(res,404,{error:'安装向导已关闭'});
       if(!file)return json(res,404,{error:'未找到'});
       let body=await readFile(path.join(root,'public',file.name));
       // 设置页：服务器直接在 <html> 上加 settings-boot，页面一出来就隐藏登录壳/应用壳，不依赖后面才加载的脚本
@@ -1946,7 +2079,7 @@ const server=http.createServer(async(req,res)=>{
       res.writeHead(200,{
         'Content-Type':file.type,'Cache-Control':'no-cache',ETag:etag,Vary:'Accept-Encoding, Cookie',...(gz?{'Content-Encoding':'gzip'}:{}),
         'X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin','X-Frame-Options':'DENY',
-        ...(file.html?{'Content-Security-Policy':"default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; connect-src 'self' https://challenges.cloudflare.com; frame-src https: https://challenges.cloudflare.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"}:{})
+        ...(file.html?{'Content-Security-Policy':pathname==='/setup'?"default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'":"default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; connect-src 'self' https://challenges.cloudflare.com; frame-src https: https://challenges.cloudflare.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"}:{})
       });
       return res.end(req.method==='HEAD'?undefined:payload);
     }
@@ -1956,6 +2089,42 @@ const server=http.createServer(async(req,res)=>{
       return json(res,200,{mode:appMode(),name:site.name||'',notice:site.notice||'',adminRestricted:currentAdminPolicy().adminAllowedIps.length>0});
     }
     const inviteApi=pathname.match(/^\/api\/invite\/([A-Za-z0-9_-]{16,80})(\/accept)?$/);
+    if(pathname.startsWith('/api/setup/')){
+      if(!setupAvailable())return setupError(res,404,'安装向导已关闭');
+      if(req.method!=='GET'&&!sameOrigin(req))return setupError(res,403,'来源校验失败');
+      if(pathname==='/api/setup/authorize'&&req.method==='POST'){
+        if(setupRateLimited(req,'authorize'))return setupError(res,429,'尝试过多，请稍后再试');
+        const body=await readBody(req,4096),token=String(body.token||'').trim();
+        const ok=token.length>=32&&setupTokenDigest&&timingSafeEqual(Buffer.from(sha(token)),Buffer.from(setupTokenDigest));
+        if(!ok){await recordSecurityEvent('setup_token_failed',req,null,{});return setupError(res,401,'安装令牌无效或已过期')}
+        const safeTemplates=providerTemplates.map(({id,name,baseUrl,keyHint,keyOptional,note})=>({id,name,baseUrl,keyHint,keyOptional:Boolean(keyOptional),note}));return json(res,200,{authorized:true,profile:'full-native',actions:setupPublicStatus().actions,templates:safeTemplates});
+      }
+      const setup=setupSession(req);if(!setup)return setupError(res,401,'安装会话已过期，请重新授权');
+      if(pathname==='/api/setup/providers/probe'&&req.method==='POST'){
+        if(setupRateLimited(req,'provider-probe'))return setupError(res,429,'模型探测次数过多，请稍后再试');
+        const body=await readBody(req,16*1024),apiKey=String(body.apiKey||'').trim(),model=String(body.model||'').trim();
+        if(apiKey.length>500||model.length>200)return setupError(res,400,'模型配置过长');
+        let baseUrl;try{baseUrl=normalizeBaseUrl(body.baseUrl)}catch(error){return setupError(res,400,error.message)}
+        const result=await probeProvider({baseUrl,apiKey,model:model||undefined});
+        if(!result.ok)return setupError(res,502,result.detail||'模型服务连接失败');
+        return json(res,200,{ok:true,baseUrl,detail:result.detail||'连接成功',models:Array.isArray(result.models)?result.models:[],labels:result.labels&&typeof result.labels==='object'?result.labels:{}});
+      }
+      if(pathname==='/api/setup/status'&&req.method==='GET')return json(res,200,setupPublicStatus());
+      if(pathname==='/api/setup/cancel'&&req.method==='POST'){setupSessions.delete(sha(setupCookieValue(req)));return json(res,200,{ok:true})}
+      if(pathname==='/api/setup/start'&&req.method==='POST'){
+        if(setupJob.state==='running'||setupJob.state==='completed')return setupError(res,409,'安装任务已经在运行或已完成');
+        const body=await readBody(req,16*1024),email=String(body.email||'').trim().toLowerCase(),password=String(body.password||''),confirm=String(body.confirmPassword||''),displayName=String(body.displayName||'').trim().slice(0,60),registry=body.registry==='cn'?'cn':'default',components=body.components&&typeof body.components==='object'?body.components:{};
+        if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||email.length>254)return setupError(res,400,'邮箱格式无效');
+        const problem=passwordProblem(password);if(problem||password.length<16||password.length>200)return setupError(res,400,problem||'管理员密码至少 16 个字符');
+        if(password!==confirm)return setupError(res,400,'两次输入的密码不一致');
+        let config;try{config=cleanSetupConfig(body.config)}catch(error){return setupError(res,400,error.message)}
+        if(Object.keys(db.users).length)return setupError(res,409,'管理员账号已存在，安装已锁定');
+        setupJob.id=randomUUID();setupJob.state='queued';setupJob.actions={};await recordSecurityEvent('setup_started',req,null,{jobId:setupJob.id,registry,storage:config.storage,transport:config.transport});
+        runSetupJob({email,password,displayName,registry,components,config}).catch(()=>{});
+        return json(res,202,{started:true,jobId:setupJob.id});
+      }
+      return setupError(res,404,'未找到');
+    }
     if(inviteApi){
       const invite=findInvite(inviteApi[1]);
       if(rateLimited(req,'invite'))return json(res,429,{error:'尝试过多，请稍后再试'});
@@ -2170,6 +2339,10 @@ const server=http.createServer(async(req,res)=>{
       await recordSecurityEvent(approve?'recover_phone_approved':'recover_phone_denied',req,session.user.id,{from:decided.ip});
       return json(res,200,{ok:true,status:decided.status,ip:decided.ip,ua:decided.ua});
     }
+    if(pathname==='/api/admin/service-update'&&req.method==='GET'){
+      if(!isAdmin)return adminOnly();
+      return json(res,200,{...(await latestServiceUpdate()),setupCompleted:db.settings.setup?.status==='completed',nativeCommand:'sudo bash /opt/yumeiro/deploy/yumeiro-native.sh update',dockerCommand:'docker compose up -d --build yumeiro',message:'发布新版本后，先备份数据，再执行对应部署方式的更新；更新会重启服务。'});
+    }
     // AI 服务商接入（管理员）与可用模型列表（所有登录用户）
     if(pathname==='/api/models'&&req.method==='GET'&&(refreshCindyModelsInBackground(session.user)||true))return json(res,200,{models:modelCatalog(session.user),defaultModel:defaultModelRef(session.user)});
     if(pathname==='/api/admin/providers'&&req.method==='GET'){
@@ -2380,10 +2553,30 @@ const server=http.createServer(async(req,res)=>{
     if(pathname==='/api/workspaces'&&req.method==='GET')return json(res,200,{runner:runnerEnabled,workspaces:Object.values(db.workspaces).filter(item=>workspaceFor(item.id,session.user)).sort((a,b)=>b.createdAt-a.createdAt).map(item=>safeWorkspace(item,session.user))});
     if(pathname==='/api/workspaces'&&req.method==='POST'){
       if(Object.values(db.workspaces).filter(item=>item.ownerId===session.user.id).length>=20)return json(res,400,{error:'工作区数量已达上限（20）'});
-      const name=String((await readBody(req)).name||'').trim().slice(0,60);
+      const body=await readBody(req),name=String(body.name||'').trim().slice(0,60),visibility=['private','members','team','public'].includes(body.visibility)?body.visibility:'private';
       if(!name)return json(res,400,{error:'请填写工作区名称'});
-      const workspace={id:randomUUID(),ownerId:session.user.id,name,memberIds:[],createdAt:Date.now()};
-      db.workspaces[workspace.id]=workspace;addAudit(db,{userId:session.user.id,action:'workspace.create',target:name,ip:clientIp(req)});await persist();return json(res,201,{workspace:safeWorkspace(workspace,session.user)});
+      const emails=[...new Set((Array.isArray(body.members)?body.members:[]).map(item=>String(item).trim().toLowerCase()).filter(Boolean))];
+      if(visibility==='private'&&emails.length)return json(res,400,{error:'仅自己空间不能添加指定成员'});
+      if(emails.length>20)return json(res,400,{error:'成员最多 20 人'});
+      const memberIds=[];
+      for(const email of emails){const user=Object.values(db.users).find(item=>item.email===email&&!item.disabled);if(!user)return json(res,400,{error:'找不到成员账号：'+email});if(user.id!==session.user.id)memberIds.push(user.id)}
+      const workspace={id:randomUUID(),ownerId:session.user.id,name,visibility,memberIds,createdAt:Date.now()};
+      db.workspaces[workspace.id]=workspace;addAudit(db,{userId:session.user.id,action:'workspace.create',target:name,detail:'可见性 '+visibility,ip:clientIp(req)});await persist();return json(res,201,{workspace:safeWorkspace(workspace,session.user)});
+    }
+    const workspaceMemberSearch=pathname.match(/^\/api\/workspaces\/([0-9a-f-]+)\/members\/search$/i);
+    if(workspaceMemberSearch&&req.method==='GET'){
+      const workspace=workspaceFor(workspaceMemberSearch[1],session.user);if(!workspace)return json(res,404,{error:'工作区不存在'});if(!canManageWorkspace(workspace,session.user))return json(res,403,{error:'只有创建者或主账号可以邀请成员'});
+      const q=String(url.searchParams.get('q')||'').trim().toLowerCase();if(q.length<2||q.length>80)return json(res,400,{error:'搜索用户名至少 2 个字符，最多 80 个字符'});
+      const existing=new Set([workspace.ownerId,...(workspace.memberIds||[])]);
+      const members=Object.values(db.users).filter(user=>user.role==='member'&&!user.disabled&&!existing.has(user.id)&&(String(user.email||'').toLowerCase().includes(q)||String(user.displayName||'').toLowerCase().includes(q))).slice(0,20).map(user=>({id:user.id,email:user.email,displayName:user.displayName||user.email}));
+      return json(res,200,{members});
+    }
+    const workspaceMemberAdd=pathname.match(/^\/api\/workspaces\/([0-9a-f-]+)\/members$/i);
+    if(workspaceMemberAdd&&req.method==='POST'){
+      const workspace=workspaceFor(workspaceMemberAdd[1],session.user);if(!workspace)return json(res,404,{error:'工作区不存在'});if(!canManageWorkspace(workspace,session.user))return json(res,403,{error:'只有创建者或主账号可以邀请成员'});
+      const body=await readBody(req),user=findWorkspaceMember(body.userId||body.identifier||body.username,workspace);if(!user)return json(res,400,{error:'找不到唯一匹配的成员，请使用搜索结果或邮箱'});if(user.id===workspace.ownerId)return json(res,400,{error:'创建者已经是工作区成员'});
+      workspace.memberIds=Array.isArray(workspace.memberIds)?workspace.memberIds:[];if(workspace.memberIds.includes(user.id))return json(res,200,{workspace:safeWorkspace(workspace,session.user),alreadyMember:true});if(workspace.memberIds.length>=20)return json(res,400,{error:'成员最多 20 人'});
+      if(workspaceVisibility(workspace)==='private')workspace.visibility='members';workspace.memberIds.push(user.id);addAudit(db,{userId:session.user.id,action:'workspace.member_add',target:workspace.name,detail:'添加成员 '+user.id,ip:clientIp(req)});await persist();return json(res,200,{workspace:safeWorkspace(workspace,session.user)});
     }
     const workspaceMatch=pathname.match(/^\/api\/workspaces\/([0-9a-f-]+)$/i);
     if(workspaceMatch&&(req.method==='PATCH'||req.method==='DELETE')){
@@ -2398,9 +2591,11 @@ const server=http.createServer(async(req,res)=>{
       }
       const body=await readBody(req);
       if(body.name!==undefined){const name=String(body.name).trim().slice(0,60);if(!name)return json(res,400,{error:'名称不能为空'});workspace.name=name}
+      if(body.visibility!==undefined){if(!['private','members','team','public'].includes(body.visibility))return json(res,400,{error:'工作区可见性无效'});if(body.visibility==='private'&&Array.isArray(body.members)&&body.members.length)return json(res,400,{error:'仅自己空间不能添加指定成员'});workspace.visibility=body.visibility}
       if(body.members!==undefined){
         const emails=[...new Set((Array.isArray(body.members)?body.members:[]).map(item=>String(item).trim().toLowerCase()).filter(Boolean))];
         if(emails.length>20)return json(res,400,{error:'成员最多 20 人'});
+        if(workspaceVisibility(workspace)==='private'&&emails.length){if(body.visibility==='private')return json(res,400,{error:'仅自己空间不能添加指定成员'});workspace.visibility='members'}
         const ids=[];
         for(const email of emails){const user=Object.values(db.users).find(item=>item.email===email&&!item.disabled);if(!user)return json(res,400,{error:'找不到成员账号：'+email});if(user.id!==workspace.ownerId)ids.push(user.id)}
         workspace.memberIds=ids;

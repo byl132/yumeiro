@@ -31,6 +31,18 @@ data class AgentOpt(val id: String, val name: String, val description: String, v
 data class SkillItem(val id: String, val title: String, val description: String, val content: String, val shared: Boolean, val mine: Boolean)
 data class MarketItem(val key: String, val type: String, val title: String, val description: String, val author: String, val installed: Boolean)
 data class Member(val id: String, val email: String, val name: String, val disabled: Boolean, val todayCalls: Int, val monthCalls: Int, val tokens: Long)
+data class WorkspaceMember(val email: String, val name: String = "", val id: String = "")
+data class Workspace(val id: String, val name: String, val createdAt: Long, val mine: Boolean, val owner: String, val members: List<WorkspaceMember>)
+data class ServiceUpdate(
+    val enabled: Boolean,
+    val reachable: Boolean,
+    val installed: String = "",
+    val latest: String = "",
+    val result: String = "",
+    val message: String = "",
+    val checkedAt: Long = 0L,
+    val pinned: String = ""
+)
 data class Approval(val code: String, val ip: String, val ua: String, val expiresAt: Long)
 data class McpItem(val name: String, val command: String, val enabled: Boolean)
 data class Conv(val id: String, val title: String, val updatedAt: Long)
@@ -48,12 +60,11 @@ class Pending(val name: String, val image: Boolean, val size: Long, val thumb: B
     val done get() = id.isNotEmpty()
 }
 
-enum class Screen { Loading, Login, Chat, Settings, Agents, Skills, Market, Admin, Security, Groups, GroupChat, GroupEdit }
+enum class Screen { Loading, Login, Chat, Settings, Agents, Skills, Market, Admin, Security }
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     val session = Session(app)
-    internal val api = ApiClient(session)
-    val group = GroupState(this)
+    private val api = ApiClient(session)
 
     var screen by mutableStateOf(Screen.Loading); private set
     var loginBusy by mutableStateOf(false); private set
@@ -86,6 +97,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val members = mutableStateListOf<Member>()
     val usageRows = mutableStateListOf<Member>()
     var usageMonth by mutableStateOf("")
+    val workspaces = mutableStateListOf<Workspace>()
+    var selectedWorkspaceId by mutableStateOf<String?>(null)
+    val workspaceMemberCandidates = mutableStateListOf<Member>()
+    var serviceUpdate by mutableStateOf<ServiceUpdate?>(null)
     val mcp = mutableStateListOf<McpItem>()
     private var mcpRaw = JSONArray()
     var themeMode by mutableStateOf(session.themeMode)
@@ -101,7 +116,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun say(text: String) { toast = text }
 
-    internal fun <T> io(block: () -> T, onError: (ApiException) -> Unit = { say(it.message ?: "出错了") }, onOk: (T) -> Unit = {}) {
+    private fun <T> io(block: () -> T, onError: (ApiException) -> Unit = { say(it.message ?: "出错了") }, onOk: (T) -> Unit = {}) {
         viewModelScope.launch {
             try { val value = withContext(Dispatchers.IO) { block() }; onOk(value) }
             catch (e: ApiException) { if (e.status == 401) expired() else onError(e) }
@@ -109,7 +124,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun expiredPublic() = expired()
     private fun expired() { session.clearLogin(); passwordInput = ""; loginError = "登录已过期，请重新登录"; screen = Screen.Login }
 
     // ---- 登录 / 退出 ----
@@ -147,12 +161,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun logout() {
         stop()
-        viewModelScope.launch { withContext(Dispatchers.IO) { api.logout() }; convs.clear(); messages.clear(); group.groups.clear(); group.messages.clear(); group.current = null; pending.clear(); currentId = null; title = "新对话"; me = JSONObject(); org.yumeiro.app.ui.Pal.wallpaper = null; org.yumeiro.app.ui.Pal.gradient = null; screen = Screen.Login }
+        viewModelScope.launch { withContext(Dispatchers.IO) { api.logout() }; convs.clear(); messages.clear(); pending.clear(); currentId = null; title = "新对话"; me = JSONObject(); org.yumeiro.app.ui.Pal.wallpaper = null; org.yumeiro.app.ui.Pal.gradient = null; screen = Screen.Login }
     }
 
     private fun enterApp() {
         screen = Screen.Chat
-        loadConvs(); loadModels(); loadConfig(); loadUsage(); loadAgents(); loadMemories(); loadWallpaperPrefs(); group.load()
+        loadConvs(); loadModels(); loadConfig(); loadUsage(); loadAgents(); loadMemories(); loadWallpaperPrefs(); loadWorkspaces()
+        if (isAdmin) loadServiceUpdate()
     }
 
     // ---- 数据 ----
@@ -282,6 +297,54 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         io({ api.call("POST", "/api/security/phone-approve", JSONObject().put("code", code.filter { it.isDigit() }).put("approve", approve)) }, onError = { done(it.message ?: "操作失败") }) {
             done(null); say(if (approve) "已批准，网页那边会自动继续" else "已拒绝这次请求"); loadApprovals()
         }
+
+    // ---- 工作区与服务更新 ----
+    private fun parseWorkspace(item: JSONObject) = Workspace(
+        id = item.optString("id"), name = item.optString("name").ifBlank { "未命名工作区" },
+        createdAt = item.optLong("createdAt"), mine = item.optBoolean("mine"),
+        owner = item.optString("owner"),
+        members = (item.optJSONArray("members") ?: JSONArray()).let { a ->
+            (0 until a.length()).mapNotNull { i ->
+                when (val value = a.opt(i)) {
+                    is JSONObject -> WorkspaceMember(value.optString("email"), value.optString("displayName"), value.optString("id"))
+                    else -> value?.toString()?.takeIf { it.isNotBlank() }?.let { WorkspaceMember(it) }
+                }
+            }
+        }
+    )
+
+    fun loadWorkspaces() = io({ api.call("GET", "/api/workspaces") }, onError = {}) { d ->
+        workspaces.clear(); workspaces.addAll((d.optJSONArray("workspaces") ?: JSONArray()).objects().map(::parseWorkspace))
+        if (selectedWorkspaceId == null || workspaces.none { it.id == selectedWorkspaceId }) selectedWorkspaceId = workspaces.firstOrNull()?.id
+    }
+
+    fun searchWorkspaceMembers(workspaceId: String, query: String) {
+        val q = query.trim()
+        workspaceMemberCandidates.clear()
+        if (q.length < 2) return
+        io({ api.call("GET", "/api/workspaces/$workspaceId/members/search?q=" + java.net.URLEncoder.encode(q, "UTF-8")) }, onError = { say(it.message ?: "搜索失败") }) { d ->
+            workspaceMemberCandidates.addAll((d.optJSONArray("members") ?: JSONArray()).objects().map { parseMember(it) })
+        }
+    }
+
+    fun inviteWorkspaceMember(workspaceId: String, userId: String, done: (String?) -> Unit = {}) {
+        io({ api.call("POST", "/api/workspaces/$workspaceId/members", JSONObject().put("userId", userId)) }, onError = { done(it.message ?: "邀请失败") }) {
+            done(null); loadWorkspaces(); say("已邀请成员")
+        }
+    }
+
+    fun removeWorkspaceMember(workspaceId: String, userId: String, done: (String?) -> Unit = {}) {
+        done("工作区成员只能邀请，暂不支持移除")
+    }
+
+    fun loadServiceUpdate() = io({ api.call("GET", "/api/admin/service-update") }, onError = {}) { d ->
+        serviceUpdate = ServiceUpdate(
+            enabled = true, reachable = true,
+            installed = d.optString("currentVersion"), latest = d.optString("latestVersion"),
+            result = if (d.optBoolean("updateAvailable")) "available" else "current",
+            message = d.optString("message"), checkedAt = d.optLong("checkedAt")
+        )
+    }
 
     // ---- 管理（仅管理员）----
     private fun parseMember(it: JSONObject) = Member(it.optString("id"), it.optString("email"), it.optString("displayName").ifBlank { it.optString("email") }, it.optBoolean("disabled"), it.optInt("todayCalls"), it.optJSONObject("month")?.optInt("calls") ?: it.optInt("calls"), it.optJSONObject("month")?.optLong("totalTokens") ?: it.optLong("totalTokens"))

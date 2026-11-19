@@ -34,6 +34,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -78,7 +79,9 @@ internal fun Choice(selected: Boolean, title: String, sub: String = "", onClick:
 @Composable
 fun SettingsScreen(vm: AppViewModel) {
     BackHandler { vm.closeSettings() }
+    LaunchedEffect(Unit) { vm.loadWorkspaces(); if (vm.isAdmin) { vm.loadMembers(); vm.loadServiceUpdate() } }
     var addMemory by remember { mutableStateOf(false) }; var clearAsk by remember { mutableStateOf(false) }; var pwd by remember { mutableStateOf(false) }; var picker by remember { mutableStateOf("") }
+    var workspaceEmail by remember { mutableStateOf("") }; var workspaceUserId by remember { mutableStateOf("") }; var workspaceSearch by remember { mutableStateOf("") }; var workspaceError by remember { mutableStateOf("") }
     Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { vm.closeSettings() }) { Icon(Icons.Default.ArrowBack, "返回", tint = Ink) }
@@ -91,12 +94,52 @@ fun SettingsScreen(vm: AppViewModel) {
                 if (vm.usage.isNotEmpty()) Text("用量：" + vm.usage, color = Muted, fontSize = 13.sp)
                 if (vm.me.optBoolean("hasLocalPassword", true)) TextButton(onClick = { pwd = true }) { Text("修改密码") }
             }
+            Card("工作区", "同步工作区成员与项目状态；不会在客户端保存或收集 API Key。") {
+                if (vm.workspaces.isEmpty()) Text("还没有可用工作区。", color = Muted, fontSize = 13.sp)
+                for (workspace in vm.workspaces) {
+                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { vm.selectedWorkspaceId = workspace.id }.padding(vertical = 7.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(workspace.name, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                            Text("创建者：${workspace.owner.ifBlank { "当前账号" }} · ${workspace.members.size} 位成员", color = Muted, fontSize = 12.sp)
+                        }
+                        if (vm.selectedWorkspaceId == workspace.id) Text("已选", color = Accent, fontSize = 12.sp)
+                    }
+                }
+                val workspace = vm.workspaces.firstOrNull { it.id == vm.selectedWorkspaceId }
+                if (workspace != null) {
+                    Text("成员", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                    if (workspace.members.isEmpty()) Text("暂无其他成员", color = Muted, fontSize = 13.sp)
+                    for (member in workspace.members) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(member.name.ifBlank { member.email }, color = Ink, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                    }
+                    if (workspace.mine || vm.isAdmin) {
+                        OutlinedTextField(workspaceEmail, { workspaceEmail = it; workspaceUserId = ""; workspaceError = "" }, label = { Text("邀请成员") }, singleLine = true, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = { if (workspaceUserId.isNotBlank()) vm.inviteWorkspaceMember(workspace.id, workspaceUserId) { e -> workspaceError = e ?: ""; if (e == null) { workspaceEmail = ""; workspaceUserId = "" } } else workspaceError = "请先从搜索结果选择成员" }, enabled = workspaceUserId.isNotBlank()) { Text("邀请") }
+                            if (workspace.mine || vm.isAdmin) TextButton(onClick = { vm.searchWorkspaceMembers(workspace.id, workspaceSearch) }) { Text("搜索账号") }
+                        }
+                        if (workspace.mine || vm.isAdmin) {
+                            OutlinedTextField(workspaceSearch, { workspaceSearch = it }, label = { Text("搜索成员账号（至少 2 个字符）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                            for (candidate in vm.workspaceMemberCandidates.take(5)) Text((candidate.name.ifBlank { candidate.email }), color = Muted, fontSize = 12.sp, modifier = Modifier.clickable { workspaceEmail = candidate.email; workspaceUserId = candidate.id })
+                        }
+                    }
+                    if (workspaceError.isNotBlank()) Text(workspaceError, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                }
+            }
+            if (vm.isAdmin) vm.serviceUpdate?.let { update ->
+                val reminder = update.reachable && update.latest.isNotBlank() && update.installed.isNotBlank() && update.latest != update.installed
+                Card("服务更新", if (reminder) "有新的桌面端服务版本可用" else "管理员可在网页版执行更新") {
+                    Text(if (!update.enabled) "桌面端更新服务未启用" else if (!update.reachable) "暂时无法连接更新服务" else if (reminder) "当前 ${update.installed}，最新 ${update.latest}" else "当前版本 ${update.installed.ifBlank { "未知" }}"), color = if (reminder) Accent else Muted, fontSize = 13.sp)
+                    if (update.message.isNotBlank()) Text(update.message, color = Muted, fontSize = 12.sp)
+                    TextButton(onClick = { vm.loadServiceUpdate() }) { Text("刷新状态") }
+                }
+            }
             Card("对话", "点一行选择；输入框里也能临时换模型。") {
                 PickRow("默认模型", vm.models.firstOrNull { it.ref == vm.selectedModel }?.label ?: "未选择") { picker = "model" }
                 PickRow("新对话用的智能体", vm.agents.firstOrNull { it.id == vm.selectedAgent }?.name ?: "不使用") { picker = "agent" }
             }
             Card("更多") {
-                for ((label, hint, target) in listOf(Triple("智能体", "新建、编辑、选择", Screen.Agents), Triple("群聊（多智能体）", "产品经理带队、@ 点名、圆桌", Screen.Groups), Triple("技能", "自己写，或从市场安装", Screen.Skills), Triple("技能市场", "浏览并一键安装", Screen.Market)) + (if (vm.isAdmin) listOf(Triple("网页找回密码确认", "输入网页上的验证码，批准或拒绝", Screen.Security), Triple("管理", "成员、用量、MCP 开关", Screen.Admin)) else emptyList()))
+                for ((label, hint, target) in listOf(Triple("智能体", "新建、编辑、选择", Screen.Agents), Triple("技能", "自己写，或从市场安装", Screen.Skills), Triple("技能市场", "浏览并一键安装", Screen.Market)) + (if (vm.isAdmin) listOf(Triple("网页找回密码确认", "输入网页上的验证码，批准或拒绝", Screen.Security), Triple("管理", "成员、用量、MCP 开关", Screen.Admin)) else emptyList()))
                     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { vm.open(target) }.padding(vertical = 10.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) { Text(label, color = Ink, fontSize = 15.sp); Text(hint, color = Muted, fontSize = 12.sp) }; Text("›", color = Muted, fontSize = 20.sp)
                     }

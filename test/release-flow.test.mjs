@@ -11,13 +11,12 @@ import { assembleClients, findApk, shaLine } from '../scripts/release.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const sha = text => createHash('sha256').update(text).digest('hex');
 
-test('findApk：优先用指定的；没指定就用输出目录里最新版本文件夹里的 APK；都没有返回空', () => {
+test('findApk：只接受显式指定的 APK，不复用输出目录中的历史 APK', () => {
   const out = mkdtempSync(path.join(tmpdir(), 'ym-rel-'));
   try {
     assert.equal(findApk(out), '');
-    for (const v of ['0.9.0', '0.10.0']) { mkdirSync(path.join(out, 'Yumeiro-Clients-' + v)); writeFileSync(path.join(out, 'Yumeiro-Clients-' + v, 'Yumeiro-android-debug.apk'), 'apk' + v); }
-    mkdirSync(path.join(out, 'Yumeiro-Clients-0.11.0'));   // 最新的文件夹里没有 APK，就退回到再旧一点的
-    assert.equal(path.basename(path.dirname(findApk(out))), 'Yumeiro-Clients-0.10.0');
+    mkdirSync(path.join(out, 'Yumeiro-Clients-1.0.0')); writeFileSync(path.join(out, 'Yumeiro-Clients-1.0.0', 'Yumeiro-android-debug.apk'), 'old apk');
+    assert.equal(findApk(out), '');
     const mine = path.join(out, 'my.apk'); writeFileSync(mine, 'x');
     assert.equal(findApk(out, mine), mine);
     assert.throws(() => findApk(out, path.join(out, 'nope.apk')), /找不到指定的 APK/);

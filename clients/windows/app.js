@@ -91,6 +91,7 @@
 
   // ── 状态 ──
   let convs = [], current = null, messages = [], models = [], agents = [], engines = [], workspaces = [], defaultModel = '', busy = false, streamId = 0, me = null, view = 'chat';
+  let serviceUpdate = null, serviceUpdateChecked = false;
   let chatTarget = { kind: 'model', ref: '' };
   let activeWorkspaceId = '', activeFilePath = '', workspaceTree = [], workspaceFile = null;
   let workspaceEngine = '', workspaceModel = '', workspaceMode = 'readonly', workspaceRun = { status: 'idle', events: [], text: '' };
@@ -254,6 +255,23 @@
     $('viewBadge').textContent = kind === 'agent' ? '智能体' : '普通对话'; $('hint').textContent = ''; updateEngineBar();
     emitModel();
   }
+  function renderServiceUpdateBanner(info) {
+    const banner = $('serviceUpdateBanner'); if (!banner) return;
+    banner.replaceChildren();
+    if (!info || !info.updateAvailable || !info.latestVersion) { banner.hidden = true; return; }
+    try { if (localStorage.getItem('service-update-dismiss:' + info.latestVersion) === '1') { banner.hidden = true; return; } } catch { /* localStorage may be unavailable */ }
+    const text = h('div', 'update-text', h('b', '', '发现 Yumeiro 新版本 ' + info.latestVersion), h('div', '', '当前版本 ' + (info.currentVersion || '未知') + '，建议先备份再更新。'));
+    const actions = h('div', 'update-actions');
+    const open = h('button', 'primary', '查看发布页'); open.type = 'button'; open.onclick = () => { if (info.releaseUrl) window.open(info.releaseUrl, '_blank', 'noopener,noreferrer'); };
+    const dismiss = h('button', '', '知道了'); dismiss.type = 'button'; dismiss.onclick = () => { try { localStorage.setItem('service-update-dismiss:' + info.latestVersion, '1'); } catch { /* ignore */ } banner.hidden = true; };
+    actions.append(open, dismiss); banner.append(text, actions); banner.hidden = false;
+  }
+  async function loadServiceUpdate() {
+    if (serviceUpdateChecked || me?.role !== 'admin') return;
+    serviceUpdateChecked = true;
+    try { serviceUpdate = await api('GET', '/api/admin/service-update'); renderServiceUpdateBanner(serviceUpdate); }
+    catch { /* non-admin or offline: do not block the client */ }
+  }
   async function loadModels() {
     const [modelData, agentData, engineData] = await Promise.all([
       api('GET', '/api/models'), api('GET', '/api/agents').catch(() => ({ agents: [] })), api('GET', '/api/engines').catch(() => ({ engines: [] }))
@@ -263,6 +281,7 @@
     const pinned = (() => { try { return localStorage.getItem('ym.defaultModel') || ''; } catch { return ''; } })();
     chatTarget.ref = (pinned && models.some(m => m.ref === pinned) ? pinned : '') || defaultModel || models[0]?.ref || '';
     rebuildTargetOptions();
+    loadServiceUpdate();
   }
   $('targetKind').addEventListener('change', rebuildTargetOptions);
   $('runnerSelect').addEventListener('change', () => { applyRunner(); $('modelSelect').dispatchEvent(new Event('ym-commit')); });
@@ -524,11 +543,28 @@
     engine.addEventListener('change', refreshEngineModels); model.addEventListener('change', () => { workspaceModel = model.value; }); mode.addEventListener('change', () => { workspaceMode = mode.value; }); refreshEngineModels(); renderWorkspaceTree(tree); renderWorkspaceRunEvents(events); updateWorkspaceStatus();
   }
   function labelControl(text, control) { const label = document.createElement('label'); label.className = 'workspace-control'; const span = document.createElement('span'); span.textContent = text; label.append(span, control); return label; }
-  async function openWorkspace(id) { activeWorkspaceId = id; activeFilePath = ''; workspaceFile = null; renderWorkspaceIde(); try { await loadWorkspaceTree(id); } catch (x) { toast(x.message); } }
+  async function openWorkspace(id) { activeWorkspaceId = id; activeFilePath = ''; workspaceFile = null; renderWorkspaceIde(); renderWorkspaceAccess(workspaceById(id)); try { await loadWorkspaceTree(id); } catch (x) { toast(x.message); } }
 
+  function renderWorkspaceAccess(w) {
+    if (!w) return;
+    const card = h('section', 'panel workspace-access');
+    const heading = h('h3', '', '共享与成员');
+    const visibility = { private: '仅自己', members: '指定成员', team: '全团队', public: '团队内公开' }[w.visibility || ((w.members || []).length ? 'members' : 'private')] || '仅自己';
+    const summary = h('p', '', visibility + ' · ' + ((w.memberDetails || w.members || []).length) + ' 位成员');
+    const list = h('div', 'workspace-members');
+    const details = Array.isArray(w.memberDetails) ? w.memberDetails : (w.members || []).map(email => ({ id: '', email, displayName: email }));
+    const refresh = next => { w = next || w; const i = workspaces.findIndex(x => x.id === w.id); if (i >= 0) workspaces[i] = w; summary.textContent = ({ private: '仅自己', members: '指定成员', team: '全团队', public: '团队内公开' }[w.visibility || 'private'] || '仅自己') + ' · ' + ((w.memberDetails || w.members || []).length) + ' 位成员'; list.replaceChildren(); for (const member of (w.memberDetails || (w.members || []).map(email => ({ id: '', email, displayName: email })))) { const row = h('div', 'workspace-member-row', h('span', '', (member.displayName || member.email) + (member.email && member.displayName !== member.email ? ' · ' + member.email : ''))); list.append(row); } };
+    refresh(w); card.append(heading, summary, list);
+    if (w.canManage) {
+      const input = h('input', 'fld'); input.placeholder = '输入用户名或邮箱（至少 2 个字符）'; const results = h('div', 'workspace-member-results'); const search = h('button', 'ghost-btn', '搜索成员'); search.type = 'button';
+      const runSearch = async () => { const q = input.value.trim(); if (q.length < 2) { results.replaceChildren(h('small', '', '请输入至少 2 个字符')); return; } try { const data = await api('GET', '/api/workspaces/' + encodeURIComponent(w.id) + '/members/search?q=' + encodeURIComponent(q)); results.replaceChildren(); for (const candidate of data.members || []) { const invite = h('button', 'ghost-btn', '邀请'); invite.type = 'button'; invite.onclick = async () => { try { const added = await api('POST', '/api/workspaces/' + encodeURIComponent(w.id) + '/members', { userId: candidate.id }); refresh(added.workspace); results.replaceChildren(); input.value = ''; toast(added.alreadyMember ? '成员已经在工作区中' : '成员已邀请'); } catch (x) { toast(x.message); } }; results.append(h('div', 'workspace-member-row', h('span', '', (candidate.displayName || candidate.email) + ' · ' + candidate.email), invite)); } if (!results.childNodes.length) results.append(h('small', '', '没有找到可邀请的普通成员')); } catch (x) { results.replaceChildren(h('small', '', '搜索失败：' + x.message)); } };
+      search.onclick = runSearch; input.onkeydown = e => { if (e.key === 'Enter') runSearch(); }; card.append(h('div', 'workspace-invite', input, search), results);
+    }
+    page.append(card);
+  }
   async function renderNativeOld(which) {
     if (which === 'workspaces') {
-      if (activeWorkspaceId && workspaceById(activeWorkspaceId)) { renderWorkspaceIde(); try { await loadWorkspaceTree(activeWorkspaceId); } catch (x) { toast(x.message); } return; }
+      if (activeWorkspaceId && workspaceById(activeWorkspaceId)) { renderWorkspaceIde(); renderWorkspaceAccess(workspaceById(activeWorkspaceId)); try { await loadWorkspaceTree(activeWorkspaceId); } catch (x) { toast(x.message); } return; }
       clearPage('工作区', '像 IDE 一样管理项目文件，并在同一个工作区中选择编译器与模型'); const bar = document.createElement('div'); bar.className = 'page-actions'; const input = document.createElement('input'); input.placeholder = '新工作区名称'; const add = document.createElement('button'); add.className = 'primary-btn'; add.textContent = '创建工作区'; add.onclick = async () => { try { const d = await api('POST', '/api/workspaces', { name: input.value.trim() || '未命名工作区' }); workspaces.unshift(d.workspace); input.value = ''; renderNative('workspaces'); } catch (x) { toast(x.message); } }; bar.append(input, add); page.append(bar); const box = document.createElement('div'); box.className = 'page-grid'; for (const w of workspaces) { const b = document.createElement('div'); b.className = 'market-card'; const h = document.createElement('h3'); h.textContent = w.name; const p = document.createElement('p'); p.textContent = (w.mine ? '我的工作区' : '成员工作区') + ' · ' + (w.members || []).length + ' 位成员'; const open = document.createElement('button'); open.className = 'ghost-btn'; open.textContent = '打开 IDE'; open.onclick = () => openWorkspace(w.id); b.append(h, p, open); box.append(b); } if (!workspaces.length) box.append(card('还没有工作区', '创建一个工作区后即可使用 Claude Code、Codex 或 Pi')); page.append(box);
     } else if (which === 'admin') {
       clearPage('管理', '服务器、成员、模型服务商和智能体引擎'); const box = document.createElement('div'); box.className = 'page-grid';

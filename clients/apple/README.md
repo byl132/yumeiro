@@ -44,7 +44,7 @@ open Yumeiro.xcodeproj
 - 图标目前用的是 256×256 的占位图（`Resources/Assets.xcassets/AppIcon.appiconset/icon-1024.png`），正式上架前请换成 1024×1024 的图。
 
 ## 和服务器的关系
-只用服务器已有的接口（登录、对话、流式聊天、附件、模型、智能体、技能、市场、记忆、壁纸、管理等），管理员服务更新页使用 `/api/admin/service-update`（只读）。工作区成员接口由服务器提供：`GET /api/workspaces/:id/members/search`、`POST /api/workspaces/:id/members`、`DELETE /api/workspaces/:id/members/:memberId`；翻译用服务器新增的 `/api/translate`（服务器 0.42.0 起）。
+只用服务器已有的接口（登录、对话、流式聊天、附件、模型、智能体、技能、市场、记忆、壁纸、管理等），管理员服务更新页使用 `/api/admin/service-update`（只读）。工作区成员接口由服务器提供：`GET /api/workspaces/:id/members/search?q`、`POST /api/workspaces/:id/members`（请求体 `{userId}`，工作区成员不支持移除）；翻译用服务器新增的 `/api/translate`（服务器 0.42.0 起）。
 
 ## 代码结构
 ```

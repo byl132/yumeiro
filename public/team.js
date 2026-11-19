@@ -74,11 +74,11 @@
   const cleanPath = location.pathname.replace(/\/+$/, '');
   const pageMode = cleanPath === '/settings' ? 'member' : cleanPath === '/admin/settings' ? 'admin' : cleanPath === '/market' ? 'market' : cleanPath === '/workspaces' ? 'workspaces' : null;
   const MEMBER_TABS = [['usage', '用量'], ['dashboard', '仪表盘'], ['market', '市场'], ['tokens', 'API 令牌'], ['agents', '智能体'], ['workspaces', '工作区'], ['skills', '技能工坊'], ['bots', '机器人'], ['wallpapers', '壁纸'], ['cindy', 'Cindy 账号'], ['audit', '操作记录']];
-  const ADMIN_TABS = [['members', '团队成员'], ['invites', '邀请成员'], ['userskills', '用户技能'], ['providers', 'AI 接入'], ['engines', '智能体引擎'], ['mcp', 'MCP 服务'], ['voice', '语音识别'], ['tts', '语音朗读'], ['vision', '图片理解'], ['imagegen', '绘画模型'], ['security', '账号安全'], ['site', '站点设置'], ['review', '市场审核'], ['desktop', '桌面端'], ['dashboard', '团队仪表盘'], ['audit', '审计与统计'], ['env', '环境检测'], ['doctor', '服务器体检'], ['usage', '团队用量']];
+  const ADMIN_TABS = [['members', '团队成员'], ['invites', '邀请成员'], ['userskills', '用户技能'], ['providers', 'AI 接入'], ['engines', '智能体引擎'], ['mcp', 'MCP 服务'], ['voice', '语音识别'], ['tts', '语音朗读'], ['vision', '图片理解'], ['imagegen', '绘画模型'], ['security', '账号安全'], ['site', '站点设置'], ['service', '服务更新'], ['review', '市场审核'], ['desktop', '桌面端'], ['dashboard', '团队仪表盘'], ['audit', '审计与统计'], ['env', '环境检测'], ['doctor', '服务器体检'], ['usage', '团队用量']];
   const PERSONAL_HIDDEN = ['members', 'invites', 'userskills', 'review']; // 个人使用模式下隐藏的团队功能
   const tabsFor = list => (me && me.mode === 'personal') ? list.filter(t => !PERSONAL_HIDDEN.includes(t[0])) : list;
   const MEMBER_GROUPS = [['概览', ['usage', 'dashboard', 'audit']], ['开发与集成', ['tokens', 'agents', 'skills', 'bots']], ['个性化', ['wallpapers']], ['账号', ['cindy']]];
-  const ADMIN_GROUPS = [['成员', ['members', 'invites', 'userskills']], ['模型与引擎', ['providers', 'engines', 'mcp', 'voice', 'tts', 'vision', 'imagegen', 'desktop']], ['站点', ['security', 'site', 'review']], ['统计', ['dashboard', 'usage', 'audit', 'env', 'doctor']]];
+  const ADMIN_GROUPS = [['成员', ['members', 'invites', 'userskills']], ['模型与引擎', ['providers', 'engines', 'mcp', 'voice', 'tts', 'vision', 'imagegen', 'desktop']], ['站点', ['security', 'site', 'service', 'review']], ['统计', ['dashboard', 'usage', 'audit', 'env', 'doctor']]];
   const TAB_META = {
     market: ['◇', '技能与机器人市场', '挑选现成的技能和机器人模板，一键安装成你自己的；也可以把自己做的投稿给大家用。'],
     review: ['✔', '市场审核', '审核成员投稿的技能和机器人模板，决定是否上架；可以随时下架。'],
@@ -106,7 +106,8 @@
     env: ['◎', '环境检测', '实时检测服务器到 Claude / ChatGPT / Gemini / DeepSeek 的网络、出口 IP 与地区，评估被限制或封号的风险，并在风险发生前拒绝请求。'],
     doctor: ['✚', '服务器体检', '一键检查服务器：磁盘、内存、权限、HTTPS 与反向代理、模型接入、运行器、DNS、时间同步，以及到 Claude / ChatGPT / Gemini / DeepSeek 的可达性，并给出处理建议。只读，不改任何配置。'],
     security: ['⛨', '账号安全', '设置恢复密钥；忘记密码时用恢复密钥，或用已登录的手机确认，就能登录并改密码。'],
-    site: ['⌂', '站点设置', '站点名称、登录页公告、个人/团队模式、默认模型和登录安全策略。']
+    site: ['⌂', '站点设置', '站点名称、登录页公告、个人/团队模式、默认模型和登录安全策略。'],
+    service: ['↻', '服务更新', '查看当前服务版本、更新提醒和安全的升级方法。'],
   };
   const tabLabel = id => (pageMode === 'admin' && id === 'usage') ? '团队用量' : (pageMode === 'admin' && id === 'audit') ? '审计与统计' : (pageMode === 'admin' && id === 'dashboard') ? '团队仪表盘' : ((MEMBER_TABS.concat(ADMIN_TABS).find(t => t[0] === id) || [])[1] || id);
   if (pageMode) document.body.classList.add('settings-page', 'settings-' + pageMode);
@@ -268,6 +269,25 @@
   const bannerStyle = el('style', {});
   bannerStyle.textContent = '.quota-banner{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:8px 16px;font-size:13px;border-bottom:1px solid var(--line);background:#fff7e6;color:#8a5a00}.quota-banner.exceeded{background:#fdecea;color:#a12a1f}.quota-banner button{border:0;background:none;color:inherit;text-decoration:underline;padding:2px 4px}.quota-banner .acts{display:flex;gap:8px;flex:none}';
   document.head.append(bannerStyle);
+  const updateBanner = el('div', { class: 'service-update-banner', hidden: true, role: 'status' });
+  if (topbar) topbar.after(updateBanner); else document.body.prepend(updateBanner);
+  const updateStyle = el('style', {});
+  updateStyle.textContent = '.service-update-banner{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:9px 16px;font-size:13px;border-bottom:1px solid #e3b7bd;background:#fff0f2;color:#9d2637}.service-update-banner .acts{display:flex;gap:8px;align-items:center;flex:none}.service-update-banner a,.service-update-banner button{border:0;background:none;color:inherit;text-decoration:underline;padding:2px 4px;cursor:pointer}.service-update-banner button{font:inherit}';
+  document.head.append(updateStyle);
+  async function refreshServiceUpdateAlert() {
+    if (!me || me.role !== 'admin') { updateBanner.hidden = true; return; }
+    try {
+      const info = await api('/api/admin/service-update');
+      if (!info.updateAvailable || !info.latestVersion || sessionStorage.getItem('service-update-dismiss:' + info.latestVersion)) { updateBanner.hidden = true; return; }
+      updateBanner.replaceChildren(
+        el('span', { textContent: `发现 Yumeiro 新版本 ${info.latestVersion}（当前 ${info.currentVersion}），建议先备份再更新。` }),
+        el('span', { class: 'acts' },
+          info.releaseUrl ? el('a', { href: info.releaseUrl, target: '_blank', rel: 'noopener noreferrer', textContent: '查看发布页' }) : null,
+          el('button', { type: 'button', textContent: '服务更新', on: { click: () => { location.href = '/admin/settings?tab=service'; } } }),
+          el('button', { type: 'button', textContent: '知道了', on: { click: () => { sessionStorage.setItem('service-update-dismiss:' + info.latestVersion, '1'); updateBanner.hidden = true; } } })));
+      updateBanner.hidden = false;
+    } catch { updateBanner.hidden = true; }
+  }
   const month = () => new Date().toISOString().slice(0, 7);
   async function refreshAlerts() {
     try {
@@ -303,7 +323,7 @@
     else if (app.hidden) { loaded = false; banner.hidden = true; try { wallLayer.hidden = true; } catch { /* 首次执行时壁纸层还没创建 */ } document.body.classList.remove('has-wallpaper'); return; }
     if (loaded) return;
     loaded = true;
-    if (!pageMode) { await refreshSession(); await loadAgents(); await loadModels(); await refreshAlerts(); loadWallpaper(); }
+    if (!pageMode) { await refreshSession(); await loadAgents(); await loadModels(); await refreshAlerts(); await refreshServiceUpdateAlert(); loadWallpaper(); }
     else { loadWallpaper(); }
     // 第三方登录回到本站后（?panel=cindy）直接打开“Cindy 账号”面板；带 cindy_select/cindy_error 时留给绑定表单处理后再清理地址
     const params = new URLSearchParams(location.search);
@@ -319,12 +339,13 @@
     tab = (pageMode === 'market' || pageMode === 'workspaces') ? pageMode : list.some(([id]) => id === want) ? want : list[0][0];
     if (params.has('panel') && !params.has('cindy_select') && !params.has('cindy_error')) history.replaceState(null, '', location.pathname + '?tab=' + tab);
     // 设置页：先把页面画出来；智能体/模型列表在后台并行加载，只有用到它们的标签才等一下
-    const pre = Promise.all([loadAgents(), loadModels(), refreshAlerts()]).catch(() => {});
+    const pre = Promise.all([loadAgents(), loadModels(), refreshAlerts(), refreshServiceUpdateAlert()]).catch(() => {});
     if (['agents', 'workspaces', 'bots', 'providers', 'engines'].includes(tab)) await pre;
     if (me) await open();
     bootDone();
   };
   tick(); setInterval(tick, pageMode ? 400 : 1000);
+  setInterval(() => { if (me?.role === 'admin') refreshServiceUpdateAlert(); }, 10 * 60 * 1000);
 
   async function open() {
     await refreshSession();
@@ -360,7 +381,7 @@
         : el('div', { class: 'modal-head' }, el('h2', { textContent: '团队与 API' }), el('button', { type: 'button', class: 'secondary', textContent: '关闭', on: { click: () => { backdrop.hidden = true; } } })),
       el('div', { class: 'team-tabs' }, tabs.map(([id, label]) => el('button', { type: 'button', class: id === tab ? 'on' : '', textContent: label, on: { click: () => { tab = id; if (pageMode) history.replaceState(null, '', location.pathname + '?tab=' + id); render(); } } }))),
       body);
-    try { await ({ site: renderSite, invites: renderInvites, userskills: renderUserSkills, market: renderMarket, review: renderReview, desktop: renderDesktop, skills: renderSkills, bots: renderBots, wallpapers: renderWallpapers, workspaces: renderWorkspaces, engines: renderEngines, mcp: renderMcp, cindy: renderCindy, usage: renderUsage, dashboard: renderDashboard, audit: renderAudit, env: renderEnv, doctor: renderDoctor, tokens: renderTokens, agents: renderAgents, providers: renderProviders, voice: renderVoice, imagegen: renderImageGen, tts: renderTts, vision: renderVision, security: renderSecurity, members: renderMembers })[tab](body); }
+    try { await ({ site: renderSite, service: renderService, invites: renderInvites, userskills: renderUserSkills, market: renderMarket, review: renderReview, desktop: renderDesktop, skills: renderSkills, bots: renderBots, wallpapers: renderWallpapers, workspaces: renderWorkspaces, engines: renderEngines, mcp: renderMcp, cindy: renderCindy, usage: renderUsage, dashboard: renderDashboard, audit: renderAudit, env: renderEnv, doctor: renderDoctor, tokens: renderTokens, agents: renderAgents, providers: renderProviders, voice: renderVoice, imagegen: renderImageGen, tts: renderTts, vision: renderVision, security: renderSecurity, members: renderMembers })[tab](body); }
     catch (e) { body.append(el('div', { class: 'team-err', textContent: e.message })); }
   }
   const modelLabelOf = ref => { const m = (window.yumeiroCatalog || []).find(x => x.ref === ref); return m ? modelName(m) : ref; };
@@ -661,16 +682,19 @@
   const STATUS_NAMES = { running: '运行中', completed: '已完成', stopped: '已停止', failed: '失败', step_limit: '达到步数上限', bad_decision: '主管未给出有效指令' };
 
   async function renderWorkspaces(body) {
-    const data = await api('/api/workspaces'), err = errBox(), name = el('input', { placeholder: '工作区名称，如 官网改版', maxLength: 60 });
+    const data = await api('/api/workspaces'), err = errBox(), name = el('input', { placeholder: '工作区名称，如 官网改版', maxLength: 60 }), visibility = el('select', {}, [['private', '仅自己'], ['members', '指定成员'], ['team', '全团队'], ['public', '团队内公开']].map(([v, t]) => el('option', { value: v, textContent: t }))), members = el('input', { placeholder: '成员邮箱，逗号分隔（指定成员时填写）', class: 'wide' });
+    const syncVisibility = () => { members.hidden = visibility.value !== 'members'; if (visibility.value !== 'members') members.value = ''; };
+    visibility.addEventListener('change', syncVisibility); syncVisibility();
+    const visibilityName = v => ({ private: '仅自己', members: '指定成员', team: '全团队', public: '团队内公开' }[v] || '仅自己');
     body.append(
-      el('p', { class: 'team-note', textContent: '工作区是一组成员共享的项目：有自己的文件目录（Claude Code / Codex / Pi 在里面读写），并可以让多个智能体按“接力 / 圆桌讨论 / 主管调度”协作完成任务。' }),
+      el('p', { class: 'team-note', textContent: '工作区可以共享项目文件和协作任务。创建时选择“指定成员、全团队或团队内公开”，就不再只是自己使用；团队内公开仅对已登录成员开放。' }),
       !data.runner && el('div', { class: 'team-err', textContent: '管理员还没有安装智能体运行器：仍可用“模型智能体”协作，但没有文件目录，也不能使用 Claude Code / Codex / Pi。' }),
-      el('div', { class: 'team-form' }, name, el('button', { type: 'button', class: 'secondary', textContent: '新建工作区', on: { click: async () => { try { await api('/api/workspaces', { method: 'POST', body: JSON.stringify({ name: name.value }) }); render(); } catch (e) { err.textContent = e.message; } } } })), err,
+      el('div', { class: 'team-form' }, name, visibility, members, el('button', { type: 'button', class: 'secondary wide', textContent: '新建工作区', on: { click: async () => { try { await api('/api/workspaces', { method: 'POST', body: JSON.stringify({ name: name.value, visibility: visibility.value, members: members.value.split(/[,，\s]+/).filter(Boolean) }) }); render(); } catch (e) { err.textContent = e.message; } } } })), err,
       data.workspaces.length ? data.workspaces.map(w => el('div', { class: 'team-row' },
-        el('div', { class: 'grow' }, w.name, el('small', { textContent: `创建者 ${w.owner || '—'}　成员 ${w.members.length ? w.members.join('、') : '无'}` })),
+        el('div', { class: 'grow' }, w.name, el('small', { textContent: `${visibilityName(w.visibility)}　创建者 ${w.owner || '—'}　成员 ${w.members.length ? w.members.join('、') : '无'}` })),
         el('div', { style: 'display:flex;gap:6px' },
           el('button', { type: 'button', class: 'secondary', textContent: '打开', on: { click: () => { body.replaceChildren(); renderWorkspace(body, w, data.runner); } } }),
-          w.mine || me.role === 'admin' ? el('button', { type: 'button', class: 'secondary', textContent: '删除', on: { click: async () => { if (!confirm('删除工作区“' + w.name + '”？目录里的文件和协作记录都会被删除。')) return; await api('/api/workspaces/' + w.id, { method: 'DELETE' }); render(); } } }) : null))) : el('p', { class: 'team-note', textContent: '还没有工作区。' }));
+          (w.canManage ?? (w.mine || me.role === 'admin')) ? el('button', { type: 'button', class: 'secondary', textContent: '删除', on: { click: async () => { if (!confirm('删除工作区“' + w.name + '”？目录里的文件和协作记录都会被删除。')) return; await api('/api/workspaces/' + w.id, { method: 'DELETE' }); render(); } } }) : null))) : el('p', { class: 'team-note', textContent: '还没有工作区。' }));
   }
 
   // 文件管理：版本历史与还原、过期文件清理（人工确认后才删除，删除前一律先备份）
@@ -737,10 +761,43 @@
     const back = el('button', { type: 'button', class: 'secondary', textContent: '← 返回工作区列表', on: { click: () => render() } });
     body.append(back, el('h3', { textContent: w.name }));
 
-    if (w.mine || me.role === 'admin') {
-      const members = el('input', { class: 'wide', value: w.members.join(', '), placeholder: '成员邮箱，逗号分隔（须是本站已有账号）' });
-      body.append(el('div', { class: 'team-form' }, members, el('button', { type: 'button', class: 'secondary wide', textContent: '保存成员', on: { click: async () => {
-        try { await api('/api/workspaces/' + w.id, { method: 'PATCH', body: JSON.stringify({ members: members.value.split(/[,，\s]+/).filter(Boolean) }) }); err.textContent = ''; info.textContent = '成员已保存'; } catch (e) { err.textContent = e.message; }
+    if (w.canManage ?? (w.mine || me.role === 'admin')) {
+      const memberPanel = el('div', {}), search = el('input', { placeholder: '输入用户名或邮箱搜索成员（至少 2 个字符）', class: 'wide' }), results = el('div', {}), memberList = el('div', { class: 'workspace-members' });
+      const details = () => Array.isArray(w.memberDetails) ? w.memberDetails : (w.members || []).map(email => ({ id: '', email, displayName: email }));
+      const drawMembers = () => {
+        const items = details();
+        memberList.replaceChildren(...(items.length ? items.map(member => {
+          const row = el('div', { class: 'team-row' }, el('div', { class: 'grow' }, member.displayName || member.email, el('small', { textContent: member.email })));
+          return row;
+        }) : [el('p', { class: 'team-note', textContent: '还没有指定成员。' })]));
+      };
+      const invite = async () => {
+        const q = search.value.trim();
+        if (q.length < 2) { err.textContent = '请输入至少 2 个字符'; return; }
+        try {
+          const data = await api('/api/workspaces/' + w.id + '/members/search?q=' + encodeURIComponent(q));
+          const candidateRow = candidate => {
+            const row = el('div', { class: 'team-row' }, el('div', { class: 'grow' }, candidate.displayName, el('small', { textContent: candidate.email })));
+            row.append(el('button', { type: 'button', class: 'secondary', textContent: '邀请', on: { click: async () => {
+              try { const result = await api('/api/workspaces/' + w.id + '/members', { method: 'POST', body: JSON.stringify({ userId: candidate.id }) }); Object.assign(w, result.workspace); drawMembers(); results.replaceChildren(); search.value = ''; info.textContent = result.alreadyMember ? '该成员已经在空间中' : '成员已加入工作区'; } catch (e) { err.textContent = e.message; }
+            } } }));
+            return row;
+          };
+          results.replaceChildren(...(data.members.length ? data.members.map(candidateRow) : [el('p', { class: 'team-note', textContent: '没有找到可邀请的成员。' })]));
+        } catch (e) { err.textContent = e.message; }
+      };
+      memberPanel.append(el('h4', { textContent: '成员列表' }), memberList, el('div', { class: 'team-form' }, search, el('button', { type: 'button', class: 'secondary', textContent: '搜索并邀请成员', on: { click: invite } })), results);
+      body.append(memberPanel); drawMembers();
+    }
+    if (!(w.canManage ?? (w.mine || me.role === 'admin'))) {
+      const members = Array.isArray(w.memberDetails) ? w.memberDetails : (w.members || []).map(email => ({ email, displayName: email }));
+      const rows = members.map(member => el('div', { class: 'team-row' }, el('div', { class: 'grow' }, member.displayName || member.email, el('small', { textContent: member.email }))));
+      body.append(el('h4', { textContent: '成员列表' }), ...(rows.length ? rows : [el('p', { class: 'team-note', textContent: '还没有指定成员。' })]));
+    }
+    if (w.canManage ?? (w.mine || me.role === 'admin')) {
+      const visibility = el('select', {}, [['private', '仅自己'], ['members', '指定成员'], ['team', '全团队'], ['public', '团队内公开']].map(([v, t]) => el('option', { value: v, textContent: t, selected: v === (w.visibility || (w.members.length ? 'members' : 'private')) })));
+      body.append(el('div', { class: 'team-form' }, visibility, el('button', { type: 'button', class: 'secondary wide', textContent: '保存共享范围', on: { click: async () => {
+        try { const result = await api('/api/workspaces/' + w.id, { method: 'PATCH', body: JSON.stringify({ visibility: visibility.value }) }); Object.assign(w, result.workspace); err.textContent = ''; info.textContent = '共享范围已保存'; } catch (e) { err.textContent = e.message; }
       } } })));
     }
     const info = el('div', { class: 'team-note' });
@@ -1888,6 +1945,27 @@
       el('div', { class: 'team-note', textContent: '提示：Claude Code / Codex 的“订阅账号登录”与“官方 API Key”风险不同——多人共用同一个个人订阅账号通常违反服务条款，被封风险最高；团队使用请让每人用自己的账号，或统一使用官方 API Key。' }));
     poll(false);
     timer = setInterval(() => { if (!body.isConnected) clearInterval(timer); else poll(true); }, 10000);
+  }
+
+  async function renderService(body) {
+    const info = await api('/api/admin/service-update'), err = errBox();
+    const native = el('pre', { class: 'team-code', textContent: info.nativeCommand });
+    const docker = el('pre', { class: 'team-code', textContent: info.dockerCommand });
+    const check = info.error
+      ? el('div', { class: 'team-err', textContent: info.error })
+      : info.updateAvailable
+        ? el('div', { class: 'team-err', textContent: `发现新版本 ${info.latestVersion}（当前 ${info.currentVersion}），请打开发布页查看更新说明：` }, el('a', { href: info.releaseUrl, target: '_blank', rel: 'noopener noreferrer', textContent: '查看发布页' }))
+        : el('div', { class: 'team-note', textContent: `当前已是最新版本（${info.currentVersion}）。上次检查：${fmt(info.checkedAt)}` });
+    body.append(
+      el('div', { class: 'team-row', style: 'display:block;border-color:var(--accent)' },
+        el('b', { textContent: '当前服务版本：' + info.currentVersion }),
+        el('p', { class: 'team-note', textContent: info.setupCompleted ? '首次安装已完成。管理端会自动检查 GitHub Releases，有新版本时在这里提醒。' : '首次安装尚未完成，请先打开 /setup 完成初始化。' })),
+      el('h3', { textContent: '服务器服务更新提醒' }), check,
+      info.latestVersion && el('p', { class: 'team-note', textContent: '最新版本：' + info.latestVersion + (info.publishedAt ? '　发布时间：' + fmt(info.publishedAt) : '') }),
+      el('p', { class: 'team-note', textContent: info.message }),
+      el('p', { class: 'team-note', textContent: '原生部署（systemd）更新命令：' }), native,
+      el('p', { class: 'team-note', textContent: 'Docker 部署更新命令：' }), docker,
+      el('p', { class: 'team-note', textContent: '更新会重启服务。当前网页只负责检测和提醒，不会未经确认自动重启生产服务。' }), err);
   }
 
   async function renderSite(body) {
