@@ -38,6 +38,7 @@ final class AppModel: ObservableObject {
     @Published var usageRows: [Member] = []
     @Published var usageMonth = ""
     @Published var mcp: [McpItem] = []
+    @Published var serviceUpdate: JSON = [:]
     private var mcpRaw: [JSON] = []
     @Published var themeMode: String
     @Published var fontScale: Double
@@ -430,6 +431,10 @@ final class AppModel: ObservableObject {
         guard let d = await guarded({ try await api.call("GET", "/api/admin/mcp") }) else { return }
         mcpRaw = d.list("servers")
         mcp = mcpRaw.map { s in McpItem(name: s.str("name"), command: (s.str("command") + " " + (((s["args"] as? [String]) ?? []).joined(separator: " "))).trimmingCharacters(in: .whitespaces), enabled: s.bool("enabled", true)) }
+    }
+    func loadServiceUpdate() async {
+        guard isAdmin else { serviceUpdate = [:]; return }
+        serviceUpdate = await guarded(quiet: true, { try await api.call("GET", "/api/admin/service-update") }) ?? [:]
     }
     func toggleMcp(_ name: String, _ enabled: Bool) async {
         var copy = mcpRaw
