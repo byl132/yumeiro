@@ -516,7 +516,7 @@
     const act = async (a, kind) => { report.textContent = kind === 'sync' ? '正在同步…' : '正在测试（会向官方网关发一次 1 token 的请求）…'; try { const r = await api(`/api/cindy/accounts/${a.id}/${kind}`, { method: 'POST', body: JSON.stringify({}) }); report.textContent = kind === 'sync' ? (r.ok ? `同步成功：${r.models} 个对话模型` : '同步失败：' + (r.syncError || '未知原因')) : r.steps.map(x => (x.ok ? '✓ ' : '✗ ') + x.name + '：' + x.detail).join('\n'); loadModels(); } catch (e) { report.textContent = e.message; } };
     const sharePanel = () => {
       if (!sharing) return null;
-      const box = el('div', { style: 'display:flex;flex-direction:column;align-items:flex-start;gap:8px;border:1px solid var(--line,#8884);border-radius:12px;padding:14px;margin:8px 0' });
+      const box = el('div', { style: 'display:flex;flex-direction:column;align-items:stretch;gap:8px;min-width:0;border:1px solid var(--line,#8884);border-radius:12px;padding:14px;margin:8px 0' });
       const msg = el('div', { class: 'team-err' });
       if (sharing.allowed) {
         box.append(el('strong', { textContent: '团队共享 Cindy 账号：已开启' }), el('p', { class: 'team-note', textContent: sharing.byEnv ? '由服务器环境变量 CINDY_ALLOW_SHARED_ACCOUNTS=1 开启。' : `已由 ${sharing.ack?.email || '主账号'} 于 ${sharing.ack?.at ? fmt(sharing.ack.at) : ''} 确认：已阅读 Cindy 用户协议并自行承担后果。` }));
@@ -529,7 +529,8 @@
       let started = false, left = secs, timer = null;
       const sync = () => { check.disabled = !(started && left <= 0); if (check.disabled) check.checked = false; go.disabled = check.disabled || !check.checked; };
       check.addEventListener('change', sync);
-      const link = (href, text) => el('a', { href, target: '_blank', rel: 'noopener noreferrer', textContent: text, style: 'margin-right:12px', on: { click: () => start() } });
+      // 官网链接做成并排的“链接卡片”：图标 + 名称 + 域名 + ↗，整块可点；点击后开始计时
+      const link = (href, text, sub, icon) => el('a', { href, target: '_blank', rel: 'noopener noreferrer', class: 'link-card', on: { click: () => start() } }, el('span', { class: 'lc-i', textContent: icon }), el('span', { class: 'lc-t' }, el('strong', { textContent: text }), el('small', { textContent: sub })), el('span', { class: 'lc-go', textContent: '↗' }));
       async function start() {
         if (started) return; started = true;
         try { const r = await api('/api/cindy/sharing/start', { method: 'POST', body: JSON.stringify({}) }); left = r.minSeconds ?? secs; } catch (e) { started = false; msg.textContent = e.message; return; }
@@ -541,7 +542,7 @@
         el('strong', { textContent: '团队共享 Cindy 账号：未开启（默认关闭）' }),
         el('p', { class: 'team-note', textContent: '把一个 Cindy 账号共享给团队成员，等于让多人共用同一个订阅额度。Cindy 官方的用户协议/服务条款是否允许这样做，请你自己确认；如果协议不允许，可能导致账号被限制或封禁，一切后果由你自行承担，与本项目及制作者无关。' }),
         el('p', { class: 'team-note', textContent: `请先点下面的链接打开 Cindy 官网，在页脚找到“用户协议 / 服务条款”并认真阅读。点击后开始计时，满 ${secs} 秒才能确认（服务器记录时间，不可跳过）。` }),
-        el('div', {}, link('https://cindy.app', 'Cindy 国际版官网'), link('https://cindy.com.cn', 'Cindy 国内版官网')),
+        el('div', { class: 'link-cards' }, link('https://cindy.app', 'Cindy 国际版', 'cindy.app', '🌐'), link('https://cindy.com.cn', 'Cindy 国内版', 'cindy.com.cn', '🇨🇳')),
         status,
         el('label', { style: 'display:flex;gap:6px;align-items:flex-start' }, check, el('span', { textContent: '我已阅读 Cindy 用户协议，知道共享账号可能违反协议，愿意自行承担全部后果。' })),
         go, msg);
