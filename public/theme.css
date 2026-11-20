@@ -135,3 +135,25 @@ html[data-theme=dark] body.settings-page .team-nav button.on{background:rgba(233
   #mobileToolsPanel .mt-l{font-size:11px;color:var(--muted,#777b86);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 }
 @media(min-width:761px){#mobileToolsButton,#mobileToolsPanel{display:none!important}}
+
+/* ---- 窄屏下的整页浮层 / 弹窗通用加固（绘画、语音通话、视觉、密码等）：不超出屏幕、标题行里的按钮不被挤成竖排、避开刘海和底部横条 ---- */
+@media(max-width:760px){
+  .modal-backdrop{padding:10px}
+  .modal{max-height:92vh;max-height:92dvh;overflow:auto;overflow-wrap:anywhere}
+  .modal-head{gap:10px;align-items:flex-start}
+  .modal-head h2{min-width:0}
+  .modal-head .secondary,.modal-head button{flex:none;white-space:nowrap;min-height:38px}
+  .modal input,.modal select,.modal textarea{max-width:100%;min-width:0;font-size:16px}
+  .modal-actions{flex-wrap:wrap}.modal-actions>*{flex:1 1 120px}
+  .ym-call{padding:calc(16px + env(safe-area-inset-top,0px)) 16px calc(16px + env(safe-area-inset-bottom,0px));overflow:auto}
+  .ym-call .ym-line{max-height:32vh;overflow:auto}
+  .ym-call button{min-height:42px}
+}
+@media(max-width:760px) and (max-height:560px){.ym-orb{width:96px!important;height:96px!important}.ym-call{gap:10px}}
+@media(max-width:760px){
+  .ym-guide{width:100vw;border-left:0}
+  .ym-guide header{flex-wrap:wrap;padding-top:calc(10px + env(safe-area-inset-top,0px))}
+  .ym-guide header button{min-height:36px;white-space:nowrap}
+  .ym-guide form{padding-bottom:calc(10px + env(safe-area-inset-bottom,0px))}
+  .ym-guide textarea{font-size:16px}
+}
