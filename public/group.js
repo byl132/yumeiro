@@ -243,7 +243,8 @@ html[data-theme=dark] #groupPanel .bubble.error{background:#2a1a1e;color:#ffb4bd
   function build() {
     const chatList = $('#chatList'); if (!chatList || $('#groupList')) return;
     listBox = el('div', { className: 'chat-list', id: 'groupList', style: 'max-height:28%;overflow:auto' });
-    chatList.before(el('div', { className: 'label', textContent: '群聊（多智能体）' }), el('button', { type: 'button', className: 'new', style: 'margin:0 0 6px', textContent: '＋ 新建群聊', on: { click: () => editGroup(null) } }), listBox);
+    const recentLabel = chatList.previousElementSibling && chatList.previousElementSibling.classList.contains('label') ? chatList.previousElementSibling : chatList; // 群聊区放在“最近对话”标题之前，别把普通对话挤到群聊下面
+    recentLabel.before(el('div', { className: 'label', textContent: '群聊（多智能体）' }), el('button', { type: 'button', className: 'new group-new', title: '新建群聊', style: 'margin:0 0 6px', textContent: '＋ 新建群聊', on: { click: () => editGroup(null) } }), listBox);
     const main = $('.main'); main.style.position = 'relative';
     titleEl = el('div', { style: 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:650' });
     msgBox = el('div', { style: 'flex:1;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:12px' });

@@ -31,6 +31,7 @@ import { VISION_LIMITS, VISION_DIALECTS, DEFAULT_VISION_MODELS, DEFAULT_PROMPT, 
 import { REMOTE_LIMITS, OS_LABELS, newPairCode, normalizePairCode, cleanInputEvents, countEvents, isJpeg, cleanDeviceName } from './remote.mjs';
 import { RECOVERY, newRecoveryKey, normalizeRecoveryKey, passwordProblem, createLimiter, createPhoneStore, createQrStore } from './recover.mjs';
 import QRCode from 'qrcode';
+import { aiKit, contextBundle, runsMarkdown, memoryMarkdown } from './aiexport.mjs';
 import { PROJECT_LIMITS, PROJECT_DIR, MANIFEST_NAME, mimeOf, renderMarkdownPage, signPreview, verifyPreview, previewHeaders, previewPath, manifestFor, planImport, localKit, cleanGuideMessages, parseGuideReply, guidePrompt } from './project.mjs';
 import { requestSetupHelper, requestUpdater, updaterConfigured } from './setup/setup-client.mjs';
 import { UPDATE_MAX_BYTES, verifySignedUpdateZip, compareVersions as compareReleaseVersions } from './updatepkg.mjs';
@@ -1189,6 +1190,16 @@ async function autoCleanup(){
 }
 const canManageWorkspace=(workspace,user)=>user.role==='admin'||workspace.ownerId===user.id;
 const workspaceMemberDetails=workspace=>(workspace.memberIds||[]).map(id=>db.users[id]).filter(user=>user&&!user.disabled).map(user=>({id:user.id,email:user.email,displayName:user.displayName||user.email}));
+// 工作区引入的智能体 / 技能 / 机器人（已被删除的自动忽略）
+const workspaceLibrary=workspace=>{const lib=workspace.library||{};return {agents:(lib.agents||[]).map(id=>db.agents[id]).filter(Boolean),skills:(lib.skills||[]).map(id=>db.skills[id]).filter(Boolean),bots:(lib.bots||[]).map(id=>db.bots[id]).filter(Boolean)}};
+// 关联了工作区的对话：把工作区引入的技能追加到系统提示，让这段对话也能用上
+function workspaceSkillPrompt(workspace){
+  if(!workspace)return '';
+  const {skills}=workspaceLibrary(workspace);if(!skills.length)return '';
+  let budget=8000;const blocks=[];
+  for(const skill of skills){const block='## '+skill.title+(skill.description?'\n'+skill.description:'')+'\n\n'+skill.content;if(block.length>budget)break;budget-=block.length;blocks.push(block)}
+  return blocks.length?'# 工作区「'+workspace.name+'」的技能\n这段对话属于该工作区；遇到相关任务时按下面的说明执行。\n\n'+blocks.join('\n\n'):'';
+}
 const safeWorkspace=(workspace,user)=>({id:workspace.id,name:workspace.name,createdAt:workspace.createdAt,visibility:workspaceVisibility(workspace),canManage:canManageWorkspace(workspace,user),mine:workspace.ownerId===user.id,owner:db.users[workspace.ownerId]?.email||null,members:(workspace.memberIds||[]).map(id=>db.users[id]?.email).filter(Boolean),memberDetails:workspaceMemberDetails(workspace)});
 function findWorkspaceMember(identifier,workspace){
   const value=String(identifier||'').trim(),lower=value.toLowerCase();if(!value)return null;
@@ -1803,7 +1814,7 @@ async function handleImagesApi(req,res,user){
     return res.end(JSON.stringify({created:Math.floor(Date.now()/1000),data:saved.map((record,index)=>({b64_json:images[index].buffer.toString('base64'),...(images[index].revised?{revised_prompt:images[index].revised}:{})}))}));
   }catch(error){return fail(error.status||502,error.message||'绘画失败')}
 }
-const safeConversation=item=>({id:item.id,title:item.title,createdAt:item.createdAt,updatedAt:item.updatedAt,agentId:item.agentId||null,model:item.model||null});
+const safeConversation=item=>({id:item.id,title:item.title,createdAt:item.createdAt,updatedAt:item.updatedAt,agentId:item.agentId||null,model:item.model||null,workspaceId:item.workspaceId&&db.workspaces[item.workspaceId]?item.workspaceId:null});
 
 // ---- Cindy 桌面端的浏览器桌面（noVNC），仅管理员可访问 ----
 // DESKTOP_VIEW_URL 例如 http://desktop:6080（见 docker-compose.desktop.yml）。未配置时整个功能关闭。
@@ -2809,6 +2820,7 @@ const server=http.createServer(async(req,res)=>{
       if(!canManageWorkspace(workspace,session.user))return json(res,403,{error:'只有创建者或主账号可以管理工作区'});
       if(req.method==='DELETE'){
         for(const [key,run]of Object.entries(db.runs))if(run.workspaceId===workspace.id)delete db.runs[key];
+        for(const chat of Object.values(db.conversations))if(chat.workspaceId===workspace.id)delete chat.workspaceId;
         delete db.workspaces[workspace.id];addAudit(db,{userId:session.user.id,action:'workspace.delete',target:workspace.name,detail:'工作区文件备份保留在服务器 .versions 目录',ip:clientIp(req)});await persist();
         if(runnerEnabled)runnerFetch('/workspace?workspace='+workspace.id,{method:'DELETE',signal:AbortSignal.timeout(10000)}).catch(()=>{});
         return json(res,200,{ok:true});
@@ -3044,6 +3056,36 @@ const server=http.createServer(async(req,res)=>{
       addAudit(db,{userId:session.user.id,action:'guide.save',target:workspace.name,detail:files.length+' 个文件（同名旧文件已备份）',ip:clientIp(req)});await persist();
       return json(res,200,{workspaceId:workspace.id,name:workspace.name,saved:files.length,hasIndex:files.some(file=>file.path==='index.html')});
     }
+    // ---- 工作区的对话与资源：关联聊天、在工作区里直接开对话、引入已有的智能体 / 技能 / 机器人 ----
+    const libraryMatch=pathname.match(/^\/api\/workspaces\/([0-9a-f-]+)\/library$/i);
+    if(libraryMatch){
+      const workspace=workspaceFor(libraryMatch[1],session.user);
+      if(!workspace)return json(res,404,{error:'工作区不存在'});
+      const lib=workspaceLibrary(workspace);
+      if(req.method==='GET'){
+        const mine=Object.values(db.conversations).filter(chat=>chat.userId===session.user.id&&!chat.botId).sort((a,b)=>b.updatedAt-a.updatedAt);
+        const chatInfo=chat=>({id:chat.id,title:chat.title,updatedAt:chat.updatedAt,count:chat.messages.length,workspaceId:chat.workspaceId||null});
+        const agents=visibleAgents(session.user),skills=Object.values(db.skills).filter(skill=>usableSkill(skill.id,session.user)),bots=Object.values(db.bots).filter(bot=>bot.ownerId===session.user.id);
+        return json(res,200,{
+          chats:mine.filter(chat=>chat.workspaceId===workspace.id).map(chatInfo),
+          candidates:mine.filter(chat=>chat.workspaceId!==workspace.id).slice(0,200).map(chatInfo),
+          library:{agents:lib.agents.map(item=>({id:item.id,name:item.name,description:item.description||''})),skills:lib.skills.map(item=>({id:item.id,name:item.title,description:item.description||''})),bots:lib.bots.map(item=>({id:item.id,name:item.name}))},
+          available:{agents:agents.map(item=>({id:item.id,name:item.name,description:item.description||''})),skills:skills.map(item=>({id:item.id,name:item.title,description:item.description||''})),bots:bots.map(item=>({id:item.id,name:item.name}))},
+          canManage:canManageWorkspace(workspace,session.user)
+        });
+      }
+      if(req.method==='PUT'){
+        if(!canManageWorkspace(workspace,session.user))return json(res,403,{error:'只有创建者或主账号可以调整工作区的智能体、技能和机器人'});
+        const body=await readBody(req),pick=(value,ok)=>[...new Set((Array.isArray(value)?value:[]).map(String))].filter(ok).slice(0,20);
+        const next={
+          agents:body.agents===undefined?lib.agents.map(item=>item.id):pick(body.agents,id=>visibleAgent(id,session.user)),
+          skills:body.skills===undefined?lib.skills.map(item=>item.id):pick(body.skills,id=>usableSkill(id,session.user)),
+          bots:body.bots===undefined?lib.bots.map(item=>item.id):pick(body.bots,id=>db.bots[id]&&db.bots[id].ownerId===session.user.id)
+        };
+        workspace.library=next;addAudit(db,{userId:session.user.id,action:'workspace.library',target:workspace.name,detail:'智能体 '+next.agents.length+'、技能 '+next.skills.length+'、机器人 '+next.bots.length,ip:clientIp(req)});await persist();
+        return json(res,200,{ok:true});
+      }
+    }
     // ---- 项目导出 / 导入 / 在线预览链接 ----
     const projectMatch=pathname.match(/^\/api\/workspaces\/([0-9a-f-]+)\/(export|import|preview-link|preview-revoke)$/i);
     if(projectMatch){
@@ -3061,6 +3103,26 @@ const server=http.createServer(async(req,res)=>{
         const pump=async()=>{while(next<files.length){const file=files[next++];const upstream=await runnerFetch('/raw?'+wq+'&path='+encodeURIComponent(file.path),{signal:AbortSignal.timeout(120000)});if(!upstream.ok)throw Object.assign(new Error('读取文件失败：'+file.path),{status:502});entries.push({name:PROJECT_DIR+'/'+file.path,data:Buffer.from(await upstream.arrayBuffer()),mtime:file.mtime})}};
         await Promise.all([pump(),pump(),pump(),pump()]);
         entries.sort((a,b)=>a.name<b.name?-1:1);
+        const aiMode=url.searchParams.get('ai'),withRuns=url.searchParams.get('runs')==='1';
+        if(aiMode==='kit'||aiMode==='context'){
+          // 给其他 AI 工具读的版本：项目文件放在根目录（不带导入清单），另附各工具的说明文件
+          const names=entries.map(entry=>({path:entry.name.slice(PROJECT_DIR.length+1),size:entry.data.length}));
+          const chatList=Object.values(db.conversations).filter(chat=>chat.userId===session.user.id&&!chat.botId&&chat.workspaceId===workspace.id).sort((a,b)=>b.updatedAt-a.updatedAt);
+          const runList=Object.values(db.runs||{}).filter(run=>run.workspaceId===workspace.id).sort((a,b)=>b.createdAt-a.createdAt),memoryMd=memoryMarkdown(workspace.name,runList,{files:names,chats:chatList});
+          const runsMd=withRuns?runsMarkdown(runList,chatList,{pipeline:'接力',roundtable:'圆桌讨论',supervisor:'主管调度'},{running:'进行中',done:'已完成',failed:'失败',completed:'已完成'}):'';
+          const stampAi=new Date().toISOString().slice(0,10).replace(/-/g,''),baseAi=workspace.name.replace(/[\\/:*?"<>|\s]+/g,'-').slice(0,60)||'project';
+          addAudit(db,{userId:session.user.id,action:'project.export',target:workspace.name,detail:names.length+' 个文件（AI 工具版：'+aiMode+(withRuns?'，含对话记录':'')+'）',ip:clientIp(req)});await persist();
+          if(aiMode==='context'){
+            const text=contextBundle(workspace.name,entries.map((entry,i)=>({path:names[i].path,data:entry.data})),{runs:runsMd,memory:memoryMd});
+            res.writeHead(200,{'Content-Type':'text/markdown; charset=utf-8','Content-Disposition':'attachment; filename="context.md"; filename*=UTF-8\'\''+encodeURIComponent(baseAi+'-上下文-'+stampAi+'.md'),'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'});
+            return res.end(text);
+          }
+          const libr=workspaceLibrary(workspace),kit=aiKit(workspace.name,names,{hasRuns:!!runsMd,memory:memoryMd,library:{skills:libr.skills.map(item=>({title:item.title,description:item.description||'',content:item.content})),agents:libr.agents.map(item=>({name:item.name,description:item.description||'',prompt:agentPrompt(item)})),bots:libr.bots.map(item=>({name:item.name,agent:db.agents[item.agentId]?.name||'',prompt:item.agentId&&db.agents[item.agentId]?agentPrompt(db.agents[item.agentId]):''}))}}),root=entries.map(entry=>({name:entry.name.slice(PROJECT_DIR.length+1),data:entry.data,mtime:entry.mtime}));
+          if(runsMd)kit.push({name:'CONVERSATION-LOG.md',data:Buffer.from(runsMd,'utf8')});
+          const zipAi=createZip([...root,...kit]);
+          res.writeHead(200,{'Content-Type':'application/zip','Content-Length':zipAi.length,'Content-Disposition':'attachment; filename="project.zip"; filename*=UTF-8\'\''+encodeURIComponent(baseAi+'-AI版-'+stampAi+'.zip'),'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'});
+          return res.end(zipAi);
+        }
         entries.unshift({name:MANIFEST_NAME,data:Buffer.from(manifestFor(workspace.name,entries.length,{local}),'utf8')});
         if(local)entries.push(...localKit(workspace.name));
         const zip=createZip(entries),base=workspace.name.replace(/[\\/:*?"<>|\s]+/g,'-').slice(0,60)||'project',stamp=new Date().toISOString().slice(0,10).replace(/-/g,'');
@@ -4043,7 +4105,8 @@ const server=http.createServer(async(req,res)=>{
       const body=await readBody(req),agentId=String(body.agent_id||''),modelRef=String(body.model||'');
       if(agentId&&!visibleAgent(agentId,session.user))return json(res,400,{error:'所选智能体不存在或不可用'});
       if(modelRef&&!resolveModel(modelRef,session.user))return json(res,400,{error:'所选模型不可用'});
-      const id=randomUUID(),now=Date.now(),item={id,userId:session.user.id,title:'新对话',createdAt:now,updatedAt:now,messages:[],...(agentId?{agentId}:{}),...(modelRef?{model:modelRef}:{})};
+      const wsId=String(body.workspace_id||'');if(wsId&&!workspaceFor(wsId,session.user))return json(res,400,{error:'所选工作区不存在'});
+      const id=randomUUID(),now=Date.now(),item={id,userId:session.user.id,title:'新对话',createdAt:now,updatedAt:now,messages:[],...(agentId?{agentId}:{}),...(modelRef?{model:modelRef}:{}),...(wsId?{workspaceId:wsId}:{})};
       db.conversations[id]=item;await persist();return json(res,201,{conversation:safeConversation(item)});
     }
     const match=pathname.match(/^\/api\/conversations\/([0-9a-f-]+)$/i);
@@ -4062,12 +4125,14 @@ const server=http.createServer(async(req,res)=>{
       const item=ownedConversation(match[1],session.user.id);
       if(!item)return json(res,404,{error:'对话不存在'});
       const body=await readBody(req),title=String(body.title??'').replace(/\s+/g,' ').trim().slice(0,80);
-      const changesModel=body.model!==undefined,changesAgent=body.agent_id!==undefined;
-      if(!title&&!changesModel&&!changesAgent)return json(res,400,{error:'标题不能为空'});
+      const changesModel=body.model!==undefined,changesAgent=body.agent_id!==undefined,changesWorkspace=body.workspace_id!==undefined;
+      if(!title&&!changesModel&&!changesAgent&&!changesWorkspace)return json(res,400,{error:'标题不能为空'});
       // 对话中途换模型/智能体：历史、摘要、记忆都保留在服务端，下一条消息起由新模型接着聊
       if(changesModel){const ref=String(body.model||'');if(ref&&!resolveModel(ref,session.user))return json(res,400,{error:'所选模型不可用'});if(ref)item.model=ref;else delete item.model}
       if(changesAgent){const agentId=String(body.agent_id||'');if(agentId&&!visibleAgent(agentId,session.user))return json(res,400,{error:'所选智能体不存在或不可用'});if(agentId)item.agentId=agentId;else delete item.agentId}
-      if(title)item.title=title;await persist();return json(res,200,{conversation:safeConversation(item)});
+      // 关联到工作区：这段对话会随工作区一起导出给其他 AI 工具；空值表示取消关联
+      if(changesWorkspace){const wsId=String(body.workspace_id||'');if(wsId&&!workspaceFor(wsId,session.user))return json(res,400,{error:'所选工作区不存在'});if(wsId)item.workspaceId=wsId;else delete item.workspaceId}
+      if(title){item.title=title;item.titleLocked=true}await persist();return json(res,200,{conversation:safeConversation(item)});
     }
     if(req.method==='POST'&&(pathname==='/api/chat'||pathname==='/api/chat/stream')){
       const streaming=pathname==='/api/chat/stream';
@@ -4080,7 +4145,7 @@ const server=http.createServer(async(req,res)=>{
       if(busyConversations.has(item.id))return json(res,409,{error:'这段对话正在生成回复，请稍候或先停止'});
       try{ensureModelReady(session.user)}catch(error){return json(res,error.status||503,{error:error.message,conversation_id:item.id})}
       {const over=quotaError(session.user);if(over)return json(res,429,{error:over,conversation_id:item.id})}
-      const agent=item.agentId?visibleAgent(item.agentId,session.user):null,useModel=pickModel(agent?.model,session.user)||pickModel(item.model,session.user)||defaultModelRef(session.user),useSystem=agent?agentPrompt(agent):systemPrompt;
+      const agent=item.agentId?visibleAgent(item.agentId,session.user):null,useModel=pickModel(agent?.model,session.user)||pickModel(item.model,session.user)||defaultModelRef(session.user),useSystem=[agent?agentPrompt(agent):systemPrompt,workspaceSkillPrompt(item.workspaceId&&workspaceFor(item.workspaceId,session.user))].filter(Boolean).join('\n\n');
       const atts=attIds.map(x=>db.attachments[x]).filter(record=>record&&record.userId===session.user.id);
       if(atts.length!==attIds.length)return json(res,400,{error:'附件已失效，请重新上传',conversation_id:item.id});
       const imageAtts=atts.filter(record=>record.kind!=='doc'),docAtts=atts.filter(record=>record.kind==='doc');
@@ -4090,7 +4155,7 @@ const server=http.createServer(async(req,res)=>{
       busyConversations.add(item.id);
       let memoryUsed=0;
       try{
-        if(!item.messages.length)item.title=(atts.length&&message.startsWith('请看这张图片')?'图片分析':atts.length&&message.startsWith('请阅读我上传的文件')?'文件分析':message).replace(/\s+/g,' ').slice(0,48);
+        if(!item.messages.length&&!item.titleLocked)item.title=(atts.length&&message.startsWith('请看这张图片')?'图片分析':atts.length&&message.startsWith('请阅读我上传的文件')?'文件分析':message).replace(/\s+/g,' ').slice(0,48);
         item.messages.push({role:'user',content:message,createdAt:Date.now(),...(imageAtts.length?{images:imageAtts.map(record=>({id:record.id,mime:record.mime,name:record.name}))}:{}),...(docAtts.length?{files:docAtts.map(record=>({id:record.id,name:record.name,bytes:record.bytes}))}:{})});for(const record of atts)record.ref=true;item.updatedAt=Date.now();await persist();
         const history=await chatHistory(item,session.user,useModel);
         const remembered=readPrefs(session.user).enabled?explicitRemember(message):null;

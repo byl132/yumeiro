@@ -122,7 +122,7 @@
   glassStyle.textContent = ".team-main input[type=checkbox],.team-main input[type=radio]{width:16px;height:16px;padding:0;flex:none;accent-color:#e95164}.team-main input[type=file],.team-main input[type=range]{height:auto;padding:0;border:0;background:none}.team-main label{display:inline-flex;align-items:center;gap:7px;min-height:32px}.team-main .team-form>label{display:flex}\n.team-nav,.team-main{-webkit-backdrop-filter:blur(16px) saturate(1.35);backdrop-filter:blur(16px) saturate(1.35);border-color:rgba(255,255,255,.65)}\n.team-nav{background:rgba(255,255,255,.62);box-shadow:0 3px 14px rgba(20,24,40,.08)}\n.team-main{background:rgba(255,255,255,.72);box-shadow:0 3px 14px rgba(20,24,40,.08)}\n.team-main .team-row{background:rgba(255,255,255,.66)}.team-main .team-row:hover{background:rgba(255,255,255,.86)}\n.team-main .secondary{background:rgba(255,255,255,.75)}.team-main .secondary:hover{background:#fff}\n.team-main .team-form input,.team-main .team-form select,.team-main .team-form textarea,.team-main textarea{background:rgba(255,255,255,.8)}\n.team-nav button:hover{background:rgba(255,255,255,.7)}.team-nav button.on{background:rgba(255,240,242,.92)}\n@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){.team-nav{background:rgba(255,255,255,.94)}.team-main{background:rgba(255,255,255,.96)}}\n.team-row .grow,.team-row small{overflow-wrap:anywhere;word-break:break-word}.team-row .grow{min-width:0}\n.team-row>button,.team-row>a{flex:none;white-space:nowrap}\n@media(max-width:640px){\n.team-main .team-row{flex-direction:column;align-items:stretch;gap:10px}\n.team-main .team-row>.grow{flex:none;width:100%}\n.team-main .team-row>button,.team-main .team-row>a{align-self:flex-start}\n.team-main .team-row>div:not(.grow){display:flex;flex-wrap:wrap;gap:6px;width:100%}\n.team-main .team-row .secondary,.team-main .team-row a.secondary{flex:0 0 auto;width:auto}\n.team-pagehead{padding:10px 14px;gap:8px 12px}.team-pagehead h2{font-size:19px}.team-pagehead .sp{display:none}.team-pagehead a:last-child{margin-left:auto}\n.team-main{padding:16px 14px 22px;border-radius:14px}.team-title{font-size:18px}\n.team-form{grid-template-columns:minmax(0,1fr)}.team-form .wide,.team-form textarea{grid-column:auto}\n.team-main .secondary.wide,.team-main .team-form>.secondary{width:100%}\n.team-code{font-size:11.5px}\n}";
   document.head.append(glassStyle);
   const marketStyle = el('style', {});
-  marketStyle.textContent = ".settings-market .team-modal,.settings-workspaces .team-modal{width:min(1240px,calc(100% - 32px))}.team-switch{display:flex;gap:6px;flex-wrap:wrap}.team-switch a{padding:6px 14px;border-radius:99px;font-size:13px;background:rgba(0,0,0,.05)}.team-switch a.on{background:var(--accent-soft);color:var(--accent)!important;font-weight:650}.mk-badge.external{background:#fff4e0;color:#9a5b00}.mk-filter{height:40px;margin:0 0 14px 10px;padding:0 12px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.8);color:var(--ink)}.mk-tools{display:flex;gap:0;flex-wrap:wrap;align-items:flex-start}.mk-tools .mk-search{flex:1 1 220px;width:auto}\n.mk-seg{display:inline-flex;gap:4px;padding:4px;border-radius:12px;background:rgba(0,0,0,.05);margin:0 0 14px;max-width:100%;overflow-x:auto}\n.mk-seg button{border:0;background:none;padding:7px 14px;border-radius:9px;font-size:13px;color:var(--ink);white-space:nowrap}.mk-seg button.on{background:#fff;color:var(--accent);font-weight:650;box-shadow:0 1px 6px rgba(20,24,40,.12)}\n.mk-search{width:100%;height:40px;margin:0 0 14px;padding:0 14px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.8);color:var(--ink)}.mk-search:focus{outline:none;border-color:#df9ca4;box-shadow:0 0 0 3px #e951641c}\n.mk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}\n.mk-card{display:flex;flex-direction:column;gap:8px;padding:14px;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.7);min-width:0}.mk-card:hover{border-color:#d7dae1;box-shadow:0 4px 16px rgba(20,24,40,.08)}\n.mk-top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}.mk-top strong{font-size:14px;overflow-wrap:anywhere}\n.mk-badge{flex:none;padding:2px 8px;border-radius:99px;font-size:11px;background:#eef0f4;color:#5a5f6c}.mk-badge.official{background:var(--accent-soft);color:var(--accent)}\n.mk-desc{margin:0;font-size:12.5px;line-height:1.6;color:#4a4f5c;flex:1}.mk-tags{display:flex;flex-wrap:wrap;gap:5px}.mk-tags span{padding:1px 8px;border-radius:99px;background:rgba(0,0,0,.05);font-size:11px;color:#5a5f6c}\n.mk-meta{font-size:11px;color:var(--muted)}.mk-actions{display:flex;gap:8px;margin-top:2px}.mk-actions .mk-install{margin-left:auto}\n.mk-preview{margin:4px 0 0;padding:10px 12px;border-radius:10px;background:rgba(127,127,140,.1);color:inherit;font:13.5px/1.75 inherit;white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow:auto}\n.team-secret{white-space:pre-wrap}.bal-card{margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(0,0,0,.04);font-size:12px}.bal-main{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}.bal-main b{font-size:22px;line-height:1.2}.bal-bar{height:6px;border-radius:99px;background:rgba(0,0,0,.08);overflow:hidden;margin:3px 0 7px}.bal-bar i{display:block;height:100%;border-radius:99px;background:var(--accent,#e95164)}.bal-row{display:flex;justify-content:space-between;gap:8px;color:var(--muted)}.bal-low b{color:#c0392b}.acct-bal{margin:2px 10px 6px;padding:6px 10px;border-radius:10px;background:rgba(0,0,0,.05);font-size:12px;line-height:1.6}.acct-bal b{font-size:15px}.mk-dlg-back{position:fixed;inset:0;z-index:50;background:#10121a8c;display:grid;place-items:center;padding:18px}.mk-dlg{width:min(860px,100%);max-height:88vh;display:flex;flex-direction:column;background:var(--ym-card,#fff);color:var(--ink,#252832);border:1px solid var(--line,#e7e8ec);border-radius:16px;box-shadow:0 24px 60px #0000004d;overflow:hidden}.mk-dlg-head{display:flex;align-items:flex-start;gap:12px;padding:16px 18px 10px}.mk-dlg-head h3{margin:0;font-size:16px}.mk-dlg-head small{display:block;color:var(--muted);margin-top:2px}.mk-dlg-body{padding:0 18px 16px;overflow:auto;flex:1}.mk-dlg-body .mk-preview{max-height:none;margin:0}.mk-name{cursor:pointer;font-weight:650;color:var(--accent,#e95164)}.mk-name:hover{text-decoration:underline}.mk-sec{margin:0 0 10px;font-size:14px;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere}.mk-trans{font-size:12px;color:#6b7080;margin:0 0 8px}.mk-dlg-foot{display:flex;justify-content:flex-end;gap:8px;padding:10px 18px 14px;border-top:1px solid var(--line,#e7e8ec)}.mk-banner{padding:10px 12px;border-radius:10px;background:#eaf6ef;color:#1f6b45;border:1px solid #c9e8d6}\n@media(max-width:640px){.mk-grid{grid-template-columns:minmax(0,1fr)}}";
+  marketStyle.textContent = ".settings-market .team-modal,.settings-workspaces .team-modal{width:min(1240px,calc(100% - 32px))}.team-switch{display:flex;gap:6px;flex-wrap:wrap}.team-switch a{padding:6px 14px;border-radius:99px;font-size:13px;background:rgba(0,0,0,.05)}.team-switch a.on{background:var(--accent-soft);color:var(--accent)!important;font-weight:650}.mk-badge.external{background:#fff4e0;color:#9a5b00}.mk-filter{height:40px;margin:0 0 14px 10px;padding:0 12px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.8);color:var(--ink)}.mk-tools{display:flex;gap:0;flex-wrap:wrap;align-items:flex-start}.mk-tools .mk-search{flex:1 1 220px;width:auto}\n.mk-seg{display:inline-flex;gap:4px;padding:4px;border-radius:12px;background:rgba(0,0,0,.05);margin:0 0 14px;max-width:100%;overflow-x:auto}\n.mk-seg button{border:0;background:none;padding:7px 14px;border-radius:9px;font-size:13px;color:var(--ink);white-space:nowrap}.mk-seg button.on{background:#fff;color:var(--accent);font-weight:650;box-shadow:0 1px 6px rgba(20,24,40,.12)}\n.mk-search{width:100%;height:40px;margin:0 0 14px;padding:0 14px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.8);color:var(--ink)}.mk-search:focus{outline:none;border-color:#df9ca4;box-shadow:0 0 0 3px #e951641c}\n.mk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}\n.mk-card{display:flex;flex-direction:column;gap:8px;padding:14px;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.7);min-width:0}.mk-card:hover{border-color:#d7dae1;box-shadow:0 4px 16px rgba(20,24,40,.08)}\n.mk-top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}.mk-top strong{font-size:14px;overflow-wrap:anywhere}\n.mk-badge{flex:none;padding:2px 8px;border-radius:99px;font-size:11px;background:#eef0f4;color:#5a5f6c}.mk-badge.official{background:var(--accent-soft);color:var(--accent)}\n.mk-desc{margin:0;font-size:12.5px;line-height:1.6;color:#4a4f5c;flex:1}.mk-tags{display:flex;flex-wrap:wrap;gap:5px}.mk-tags span{padding:1px 8px;border-radius:99px;background:rgba(0,0,0,.05);font-size:11px;color:#5a5f6c}\n.mk-meta{font-size:11px;color:var(--muted)}.mk-actions{display:flex;gap:8px;margin-top:2px}.mk-actions .mk-install{margin-left:auto}\n.mk-preview{margin:4px 0 0;padding:10px 12px;border-radius:10px;background:rgba(127,127,140,.1);color:inherit;font:13.5px/1.75 inherit;white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow:auto}\n.team-secret{white-space:pre-wrap}.bal-card{margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(0,0,0,.04);font-size:12px}.bal-main{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}.bal-main b{font-size:22px;line-height:1.2}.bal-bar{height:6px;border-radius:99px;background:rgba(0,0,0,.08);overflow:hidden;margin:3px 0 7px}.bal-bar i{display:block;height:100%;border-radius:99px;background:var(--accent,#e95164)}.bal-row{display:flex;justify-content:space-between;gap:8px;color:var(--muted)}.bal-low b{color:#c0392b}.acct-bal{margin:2px 10px 6px;padding:6px 10px;border-radius:10px;background:rgba(0,0,0,.05);font-size:12px;line-height:1.6}.acct-bal b{font-size:15px}.mk-dlg-back{position:fixed;inset:0;z-index:70;background:#10121a8c;display:grid;place-items:center;padding:18px}.mk-dlg{width:min(860px,100%);max-height:88vh;display:flex;flex-direction:column;background:var(--ym-card,#fff);color:var(--ink,#252832);border:1px solid var(--line,#e7e8ec);border-radius:16px;box-shadow:0 24px 60px #0000004d;overflow:hidden}.mk-dlg-head{display:flex;align-items:flex-start;gap:12px;padding:16px 18px 10px}.mk-dlg-head h3{margin:0;font-size:16px}.mk-dlg-head small{display:block;color:var(--muted);margin-top:2px}.mk-dlg-body{padding:0 18px 16px;overflow:auto;flex:1}.mk-dlg-body .mk-preview{max-height:none;margin:0}.mk-name{cursor:pointer;font-weight:650;color:var(--accent,#e95164)}.mk-name:hover{text-decoration:underline}.mk-sec{margin:0 0 10px;font-size:14px;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere}.mk-trans{font-size:12px;color:#6b7080;margin:0 0 8px}.mk-dlg-foot{display:flex;justify-content:flex-end;gap:8px;padding:10px 18px 14px;border-top:1px solid var(--line,#e7e8ec)}.mk-banner{padding:10px 12px;border-radius:10px;background:#eaf6ef;color:#1f6b45;border:1px solid #c9e8d6}\n@media(max-width:640px){.mk-grid{grid-template-columns:minmax(0,1fr)}}";
   document.head.append(marketStyle);
 
   const button = el('button', { class: 'icon-button', id: 'teamButton', type: 'button', title: '团队与 API', ariaLabel: '团队与 API', textContent: '⌘', on: { click: () => { if (pageMode) open(); else location.href = '/settings'; } } });
@@ -186,17 +186,18 @@
 
     // 点击导航项会高亮（“搜索对话”展开期间一直高亮，其它项高亮一小会儿，因为它们会打开别的页面 / 面板）
     const item = (key, label, run) => {
-      const btn = el('button', { type: 'button', class: 'side-item', title: label, on: { click: () => {
+      const btn = el('button', { type: 'button', class: 'side-item', 'data-key': key, title: label, on: { click: () => {
         btn.classList.add('active'); run();
         if (key === 'search') btn.classList.toggle('active', typeof search !== 'undefined' && !search.hidden);
         else setTimeout(() => btn.classList.remove('active'), 900);
       } } }, el('span', { class: 'si', innerHTML: ICONS[key] }), el('span', { class: 'sl', textContent: label }));
+      btn.dataset.key = key;   // 用 dataset 写成真正的 data-key 属性（el() 的属性写法不一定会生成它）
       return btn;
     };
-    const go = tab => () => { location.href = tab ? '/settings?tab=' + tab : '/settings'; };
+    const go = tab => () => { openSettingsPanel(tab || 'usage', tab === 'agents' ? 'agents' : 'settings'); };
     const nav = el('nav', { class: 'side-nav', ariaLabel: '快捷入口' },
       item('search', '搜索对话', () => { if (appRoot.classList.contains('side-collapsed') && isDesktop()) setCollapsed(false); search.hidden = !search.hidden || false; if (!search.hidden) search.focus(); else { search.value = ''; applyFilter(); } }),
-      item('market', '市场', () => { location.href = '/market'; }), item('agents', '智能体', go('agents')), item('settings', '设置', go('')));
+      item('market', '市场', () => openMarketPanel()), item('agents', '智能体', () => openSettingsPanel('agents', 'agents')), item('settings', '设置', () => openSettingsPanel('usage', 'settings')));
     const newChat = sidebar.querySelector('.new');
     newChat?.after(nav); nav.after(search);
   }
@@ -307,7 +308,7 @@
       banner.replaceChildren(
         el('span', { textContent: (exceeded ? '额度已用尽：' : '额度提醒：') + fresh.map(a => `${a.label}已用 ${a.percent}%（${a.used.toLocaleString()} / ${a.limit.toLocaleString()}）`).join('；') + (exceeded ? '，新的请求会被拒绝，请联系主账号。' : '，接近主账号设置的上限。') }),
         el('span', { class: 'acts' },
-          el('button', { type: 'button', textContent: '查看用量', on: { click: () => { if (pageMode) { tab = 'usage'; open(); } else location.href = '/settings?tab=usage'; } } }),
+          el('button', { type: 'button', textContent: '查看用量', on: { click: () => { if (pageMode) { tab = 'usage'; open(); } else openSettingsPanel('usage', 'settings'); } } }),
           el('button', { type: 'button', textContent: '知道了', on: { click: () => { for (const a of fresh) sessionStorage.setItem(`quota-dismiss:${a.key}:${a.level}:${month()}`, '1'); banner.hidden = true; } } })));
       banner.hidden = false;
     } catch { /* 未登录或服务暂不可用时不打扰 */ }
@@ -336,14 +337,18 @@
     // 第三方登录回到本站后（?panel=cindy）直接打开“Cindy 账号”面板；带 cindy_select/cindy_error 时留给绑定表单处理后再清理地址
     const params = new URLSearchParams(location.search);
     if (!pageMode) {
-      if (params.get('panel') === 'cindy' && me) { params.delete('panel'); params.set('tab', 'cindy'); location.replace('/settings?' + params); }
+      // 个人设置 / 智能体 / 市场都在首页里打开（旧的 /settings、/market 地址会跳回这里），不再在两个页面之间来回跳
+      if (params.get('panel') === 'cindy' && me) openSettingsPanel('cindy', 'settings');      // 保留地址里的参数：绑定表单要读它们
+      else if (params.get('panel') === 'settings' && me) { const t = params.get('tab') || 'usage'; if (!params.has('cindy_select') && !params.has('cindy_error')) history.replaceState(null, '', location.pathname); openSettingsPanel(t, t === 'agents' ? 'agents' : 'settings'); }
+      else if (params.get('panel') === 'market' && me) { history.replaceState(null, '', location.pathname); openMarketPanel(); }
       return;
     }
     if (pageMode === 'workspaces') { location.replace('/'); return; }
-    if (me && pageMode === 'admin' && me.role !== 'admin') { location.replace('/settings'); return; }
+    if (pageMode === 'market') { location.replace('/?panel=market'); return; }
+    if (me && pageMode === 'admin' && me.role !== 'admin') { location.replace('/?panel=settings'); return; }
     const want = params.get('tab') || (params.get('panel') === 'cindy' ? 'cindy' : '');
     // 市场、工作区已经是独立页面：旧的 /settings?tab=market 之类的链接自动跳过去
-    if (pageMode === 'member' && (want === 'market' || want === 'workspaces')) { location.replace(want === 'market' ? '/market' : '/'); return; }
+    if (pageMode === 'member') { location.replace(want === 'market' ? '/?panel=market' : want === 'workspaces' ? '/' : '/?panel=settings' + (params.toString() ? '&' + params.toString().replace(/^panel=[^&]*&?/, '') : '')); return; }
     const list = tabsFor(pageMode === 'admin' ? ADMIN_TABS : MEMBER_TABS);
     tab = (pageMode === 'market' || pageMode === 'workspaces') ? pageMode : list.some(([id]) => id === want) ? want : list[0][0];
     if (params.has('panel') && !params.has('cindy_select') && !params.has('cindy_error')) history.replaceState(null, '', location.pathname + '?tab=' + tab);
@@ -356,36 +361,46 @@
   tick(); setInterval(tick, pageMode ? 400 : 1000);
   setInterval(() => { if (me?.role === 'admin') refreshServiceUpdateAlert(); }, 10 * 60 * 1000);
 
+  // “智能体”“设置”直接在首页上层打开（不再跳到 /settings 页面）；打开期间对应的导航项保持高亮
+  function setNavCurrent(key) { document.querySelectorAll('.side-item[data-key=agents],.side-item[data-key=settings]').forEach(b => b.classList.toggle('current', b.dataset.key === key)); }
+  async function openModalTab(target) {
+    if (typeof closeMarketPanel === 'function') closeMarketPanel();
+    tab = target; setNavCurrent(target === 'agents' ? 'agents' : 'settings'); await open();
+    if (backdrop.hidden) setNavCurrent('');
+  }
+  new MutationObserver(() => { if (backdrop.hidden) setNavCurrent(''); }).observe(backdrop, { attributes: true, attributeFilter: ['hidden'] });
   async function open() {
     await refreshSession();
     if (!me) return;
     backdrop.hidden = false; await render();
   }
   async function render() {
-    const tabs = tabsFor(pageMode === 'admin' ? ADMIN_TABS : pageMode ? MEMBER_TABS : [...MEMBER_TABS, ...(me.role === 'admin' ? ADMIN_TABS.filter(t => t[0] !== 'usage' && t[0] !== 'security' && t[0] !== 'audit' && t[0] !== 'dashboard') : [])]);
-    if (pageMode && !tabs.some(([id]) => id === tab)) tab = tabs[0][0];
+    // 在首页面板里时（homeSettings 不为空）按“个人设置”的分组导航布局渲染；市场、工作区已经在首页里，不重复出现；管理设置不放进首页
+    const inHome = Boolean(homeSettings), mode = inHome ? 'member' : pageMode, host = inHome ? homeSettings : box;
+    const tabs = tabsFor(inHome ? MEMBER_TABS.filter(t => t[0] !== 'market' && t[0] !== 'workspaces') : pageMode === 'admin' ? ADMIN_TABS : pageMode ? MEMBER_TABS : [...MEMBER_TABS, ...(me.role === 'admin' ? ADMIN_TABS.filter(t => t[0] !== 'usage' && t[0] !== 'security' && t[0] !== 'audit' && t[0] !== 'dashboard') : [])]);
+    if ((pageMode || inHome) && !tabs.some(([id]) => id === tab)) tab = tabs[0][0];
     const body = flatBox();
-    const switchTab = id => { tab = id; if (pageMode) history.replaceState(null, '', location.pathname + '?tab=' + id); render(); };
+    const switchTab = id => { tab = id; if (pageMode && !inHome) history.replaceState(null, '', location.pathname + '?tab=' + id); render(); };
     if (pageMode === 'market' || pageMode === 'workspaces') {
       const meta = TAB_META[pageMode];
       box.replaceChildren(
         el('div', { class: 'team-pagehead' }, el('a', { href: '/', textContent: '← 返回对话' }), el('h2', { textContent: meta[1] }), el('span', { class: 'sp' }),
           null),
         el('main', { class: 'team-main' }, el('p', { class: 'team-desc', textContent: meta[2] }), body));
-    } else if (pageMode) {
-      const groups = (pageMode === 'admin' ? ADMIN_GROUPS : MEMBER_GROUPS).map(([title, ids]) => [title, ids.filter(id => tabs.some(([tid]) => tid === id))]).filter(([, ids]) => ids.length);
+    } else if (mode) {
+      const groups = (mode === 'admin' ? ADMIN_GROUPS : MEMBER_GROUPS).map(([title, ids]) => [title, ids.filter(id => tabs.some(([tid]) => tid === id))]).filter(([, ids]) => ids.length);
       const meta = TAB_META[tab] || ['', tabLabel(tab), ''];
       const nav = el('nav', { class: 'team-nav', ariaLabel: '设置导航' }, groups.flatMap(([title, ids]) => [el('h4', { textContent: title }),
         ...ids.map(id => el('button', { type: 'button', class: id === tab ? 'on' : '', 'aria-current': id === tab ? 'page' : undefined, on: { click: () => switchTab(id) } }, el('span', { class: 'ic', textContent: (TAB_META[id] || [''])[0] }), el('span', { textContent: tabLabel(id) })))]));
-      box.replaceChildren(
-        el('div', { class: 'team-pagehead' }, el('a', { href: '/', textContent: '← 返回对话' }), el('h2', { textContent: pageMode === 'admin' ? '管理设置' : '我的设置' }), el('span', { class: 'sp' }),
-          pageMode === 'admin' ? el('a', { href: '/settings', textContent: '我的设置 →' }) : (me.role === 'admin' ? el('a', { href: '/admin/settings', textContent: '管理设置 →' }) : null)),
-        el('div', { class: 'team-layout' }, nav, el('main', { class: 'team-main' }, el('h2', { class: 'team-title', textContent: meta[1] }), el('p', { class: 'team-desc', textContent: meta[2] }), body)));
+      host.replaceChildren(...[
+        inHome ? null : el('div', { class: 'team-pagehead' }, el('a', { href: '/', textContent: '← 返回对话' }), el('h2', { textContent: pageMode === 'admin' ? '管理设置' : '我的设置' }), el('span', { class: 'sp' }),
+          pageMode === 'admin' ? el('a', { href: '/?panel=settings', textContent: '我的设置 →' }) : (me.role === 'admin' ? el('a', { href: '/admin/settings', textContent: '管理设置 →' }) : null)),
+        el('div', { class: 'team-layout' }, nav, el('main', { class: 'team-main' }, el('h2', { class: 'team-title', textContent: meta[1] }), el('p', { class: 'team-desc', textContent: meta[2] }), body))].filter(Boolean));
       nav.querySelector('.on')?.scrollIntoView({ inline: 'center', block: 'nearest' });
     } else box.replaceChildren(
       pageMode
         ? el('div', { class: 'team-pagehead' }, el('a', { href: '/', textContent: '← 返回对话' }), el('h2', { textContent: pageMode === 'admin' ? '管理设置' : '我的设置' }), el('span', { class: 'sp' }),
-            pageMode === 'admin' ? el('a', { href: '/settings', textContent: '我的设置 →' }) : (me.role === 'admin' ? el('a', { href: '/admin/settings', textContent: '管理设置 →' }) : null))
+            pageMode === 'admin' ? el('a', { href: '/?panel=settings', textContent: '我的设置 →' }) : (me.role === 'admin' ? el('a', { href: '/admin/settings', textContent: '管理设置 →' }) : null))
         : el('div', { class: 'modal-head' }, el('h2', { textContent: '团队与 API' }), el('button', { type: 'button', class: 'secondary', textContent: '关闭', on: { click: () => { backdrop.hidden = true; } } })),
       el('div', { class: 'team-tabs' }, tabs.map(([id, label]) => el('button', { type: 'button', class: id === tab ? 'on' : '', textContent: label, on: { click: () => { tab = id; if (pageMode) history.replaceState(null, '', location.pathname + '?tab=' + id); render(); } } }))),
       body);
@@ -785,6 +800,7 @@
     const box = el('div', { class: 'team-main ws-overlay-body' });
     wsOverlay = el('div', { class: 'ws-overlay', role: 'dialog', ariaLabel: '工作区 ' + w.name, on: { click: e => { if (e.target === wsOverlay) wsCloseOverlay(); } } }, el('div', { class: 'ws-overlay-card' }, box));
     document.body.append(wsOverlay); document.addEventListener('keydown', wsOverlayKey, true);
+    window.dispatchEvent(new CustomEvent('yumeiro:workspace-open', { detail: { id: w.id } }));
     try { await renderWorkspace(box, w, runnerOn, startTab); } catch (e) { box.replaceChildren(el('div', { class: 'team-err', textContent: e.message }), el('button', { type: 'button', class: 'secondary', textContent: '关闭', on: { click: wsCloseOverlay } })); }
   }
   window.YumeiroWS = {
@@ -896,8 +912,8 @@
     const back = el('button', { type: 'button', class: 'secondary', textContent: wsOverlay ? '✕ 关闭' : '← 返回工作区列表', on: { click: () => (wsOverlay ? wsCloseOverlay() : render()) } });
     // 页面分成三个标签：文件与项目 / 多智能体协作 / 共享与成员（和 ChatGPT、Claude 的项目页一样，先看内容，共享设置放在单独一页）
     const VISN = { private: '🔒 仅自己', members: '👥 指定成员', team: '🏢 全团队', public: '🌐 团队内公开' };
-    const secFiles = el('div'), secTasks = el('div'), secShare = el('div'), badge = el('span', { class: 'ws-badge', textContent: VISN[w.visibility] || VISN.private });
-    const tabDefs = [...(runnerOn ? [['files', '文件与项目', secFiles]] : []), ['tasks', '多智能体协作', secTasks], ['share', '共享与成员', secShare]];
+    const secFiles = el('div'), secTasks = el('div'), secChats = el('div'), secShare = el('div'), badge = el('span', { class: 'ws-badge', textContent: VISN[w.visibility] || VISN.private });
+    const tabDefs = [...(runnerOn ? [['files', '文件与项目', secFiles]] : []), ['chats', '对话与资源', secChats], ['tasks', '多智能体协作', secTasks], ['share', '共享与成员', secShare]];
     const tabBtns = tabDefs.map(([id, label]) => el('button', { type: 'button', class: 'ws-tab', textContent: label, on: { click: () => pickTab(id) } }));
     const pickTab = id => tabDefs.forEach(([tid, , sec], k) => { sec.hidden = tid !== id; tabBtns[k].classList.toggle('on', tid === id); });
     body.append(back, el('div', { class: 'ws-head' }, el('h3', { textContent: w.name, style: 'margin:0' }), badge), el('div', { class: 'ws-tabs' }, ...tabBtns));
@@ -941,8 +957,51 @@
         try { const result = await api('/api/workspaces/' + w.id, { method: 'PATCH', body: JSON.stringify({ visibility: visibility.value }) }); Object.assign(w, result.workspace); badge.textContent = VISN[w.visibility] || VISN.private; err.textContent = ''; info.textContent = '共享范围已保存'; } catch (e) { err.textContent = e.message; }
       } } })));
     }
+    // ---- 对话与资源：这个工作区里的聊天、直接新建对话、引入已有的智能体 / 技能 / 机器人 ----
+    const openChat = id => { if (wsOverlay) wsCloseOverlay(); window.yumeiroReloadChats?.().then(() => window.yumeiroSelectChat?.(id)); };
+    const drawChats = async () => {
+      let d; try { d = await api('/api/workspaces/' + w.id + '/library'); } catch (e) { secChats.replaceChildren(el('div', { class: 'team-err', textContent: e.message })); return; }
+      const canManage = d.canManage, lib = d.library, names = x => x.length ? x.map(i => i.name).join('、') : '还没有引入';
+      const chatRows = d.chats.length ? d.chats.map(c => el('div', { class: 'team-row' },
+        el('div', { class: 'grow' }, c.title || '新对话', el('small', { textContent: c.count + ' 条消息　' + fmt(c.updatedAt) })),
+        el('button', { type: 'button', class: 'secondary', textContent: '打开', on: { click: () => openChat(c.id) } }),
+        el('button', { type: 'button', class: 'secondary', textContent: '取消关联', on: { click: async () => { try { await api('/api/conversations/' + c.id, { method: 'PATCH', body: JSON.stringify({ workspace_id: '' }) }); drawChats(); } catch (e) { ymAlert(e.message); } } } }))) : [el('p', { class: 'team-note', textContent: '还没有对话。新建一个，或把已有的聊天关联进来；关联的聊天会随工作区一起导出。' })];
+      const newChat = async () => {
+        const v = await ymForm('在工作区里新建对话', [
+          { name: 'title', label: '对话名称（可不填）', placeholder: '比如：首页配色讨论', hint: '自己起的名字不会再被 AI 自动改掉。' },
+          { name: 'agent', label: '使用的智能体', type: 'select', value: '', options: [{ value: '', label: '默认 Yumeiro' }, ...lib.agents.map(a => ({ value: a.id, label: a.name }))], hint: lib.agents.length ? '只列出这个工作区引入的智能体。' : '工作区还没有引入智能体，可以在下面的“引入的资源”里添加。' }
+        ], { okText: '新建并打开' });
+        if (!v) return;
+        try {
+          const c = (await api('/api/conversations', { method: 'POST', body: JSON.stringify({ workspace_id: w.id, agent_id: v.agent || '' }) })).conversation;
+          if (v.title.trim()) await api('/api/conversations/' + c.id, { method: 'PATCH', body: JSON.stringify({ title: v.title.trim() }) });
+          openChat(c.id);
+        } catch (e) { ymAlert(e.message); }
+      };
+      const linkChats = async () => {
+        if (!d.candidates.length) { ymAlert('没有可以关联的聊天了。'); return; }
+        const v = await ymForm('关联已有的聊天', [{ name: 'ids', label: '选择要加入这个工作区的聊天', type: 'checklist', value: [], options: d.candidates.map(c => ({ value: c.id, label: c.title || '新对话', sub: (c.workspaceId ? '已在别的工作区 · ' : '') + c.count + ' 条消息' })), empty: '没有可选的聊天' }], { okText: '关联' });
+        if (!v || !v.ids.length) return;
+        try { for (const id of v.ids) await api('/api/conversations/' + id, { method: 'PATCH', body: JSON.stringify({ workspace_id: w.id }) }); drawChats(); } catch (e) { ymAlert(e.message); }
+      };
+      const pickLib = (kind, title) => async () => {
+        const v = await ymForm('引入' + title, [{ name: 'ids', label: '选择要在这个工作区使用的' + title, type: 'checklist', value: lib[kind].map(i => i.id), options: d.available[kind].map(i => ({ value: i.id, label: i.name, sub: i.description || '' })), empty: '还没有可用的' + title + '，先到“' + (kind === 'bots' ? '机器人' : kind === 'skills' ? '技能' : '智能体') + '”里创建或从市场添加' }], { okText: '保存' });
+        if (!v) return;
+        try { await api('/api/workspaces/' + w.id + '/library', { method: 'PUT', body: JSON.stringify({ [kind]: v.ids }) }); drawChats(); } catch (e) { ymAlert(e.message); }
+      };
+      const libRow = (kind, label, title) => el('div', { class: 'team-row' }, el('div', { class: 'grow' }, label, el('small', { textContent: names(lib[kind]) })), canManage ? el('button', { type: 'button', class: 'secondary', textContent: '选择', on: { click: pickLib(kind, title) } }) : null);
+      secChats.replaceChildren(
+        el('h4', { textContent: '这个工作区的对话' }),
+        el('div', { class: 'ws-bar' }, el('button', { type: 'button', class: 'primary', textContent: '＋ 新建对话', on: { click: newChat } }), el('button', { type: 'button', class: 'secondary', textContent: '关联已有聊天', on: { click: linkChats } })),
+        ...chatRows,
+        el('h4', { textContent: '引入的资源' }),
+        el('p', { class: 'team-note', textContent: '引入的技能会自动用在这个工作区的对话里；导出给 AI 工具时，技能、智能体和机器人会一起写成其他软件能读的文件。' }),
+        libRow('agents', '智能体', '智能体'), libRow('skills', '技能', '技能'), libRow('bots', '机器人', '机器人'));
+      window.dispatchEvent(new CustomEvent('yumeiro:chat-linked'));
+    };
+    drawChats();
     const info = el('div', { class: 'team-note' });
-    body.append(info, err, secFiles, secTasks, secShare); pickTab(startTab && tabDefs.some(t => t[0] === startTab) ? startTab : tabDefs[0][0]);
+    body.append(info, err, secFiles, secChats, secTasks, secShare); pickTab(startTab && tabDefs.some(t => t[0] === startTab) ? startTab : tabDefs[0][0]);
 
     // 文件
     if (runnerOn) {
@@ -1030,6 +1089,14 @@
         el('button', { type: 'button', class: 'primary', textContent: '🌐 在线预览项目', title: '在新标签页打开 index.html（没有则看文件列表里单个文件的“预览”）', on: { click: () => previewFile('') } }),
         el('a', { href: `/api/workspaces/${w.id}/export`, textContent: '📦 下载整个项目 (zip)', title: '把工作区所有文件打包下载', class: 'secondary', style: 'text-decoration:none' }),
         el('a', { href: `/api/workspaces/${w.id}/export?local=1`, textContent: '💻 下载本地使用包', title: '项目文件 + 启动脚本：解压后双击就能在本机使用', class: 'secondary', style: 'text-decoration:none' }),
+        el('button', { type: 'button', class: 'secondary', textContent: '🤖 导出给 AI 工具', title: '生成 Claude Code / Cursor / Codex / Copilot / Gemini 能直接读取的版本', on: { click: async () => {
+          const v = await ymForm('导出给 AI 工具', [
+            { name: 'format', label: '导出形式', type: 'select', value: 'kit', options: [{ value: 'kit', label: '项目压缩包（带 AGENTS.md / CLAUDE.md / Cursor 规则等说明）' }, { value: 'context', label: '单个 Markdown 文件（文件树 + 全部代码，可直接粘贴给 ChatGPT / Claude 网页版）' }], hint: '压缩包适合 Claude Code、Codex、Cursor、Copilot、Gemini CLI 打开；单文件适合粘贴到聊天框。' },
+            { name: 'runs', label: '附上对话记录', type: 'select', value: '1', options: [{ value: '1', label: '附上（任务、每一步产出、最终结果）' }, { value: '0', label: '不附' }], hint: '完整对话原文。不管选不选，导出里都会带一份自动整理的「关键记忆」（PROJECT-MEMORY.md）：最近在做什么、做过什么结论、哪些没做完。' }
+          ], { okText: '导出' });
+          if (!v) return;
+          const a = el('a', { href: `/api/workspaces/${w.id}/export?ai=${v.format}&runs=${v.runs}` }); document.body.append(a); a.click(); a.remove();
+        } } }),
         el('button', { type: 'button', class: 'secondary', textContent: '⬆ 导入项目 (zip)', on: { click: () => importPick.click() } }),
         (w.mine || me.role === 'admin') ? el('button', { type: 'button', class: 'secondary danger', textContent: '撤销预览链接', title: '让已经发出去的预览链接立刻失效', on: { click: async () => { try { await api(`/api/workspaces/${w.id}/preview-revoke`, { method: 'POST', body: '{}' }); projStatus.textContent = '已撤销：之前生成的预览链接都已失效'; } catch (e) { err.textContent = e.message; } } } }) : null,
         importPick, el('div', { style: 'flex:1 0 100%' }, projStatus));
@@ -1040,7 +1107,7 @@
     }
 
     // 协作
-    const task = el('textarea', { placeholder: '要完成的任务。例如：为本项目写一个登录页，并检查安全问题。' });
+    const task = el('textarea', { class: 'ws-task', rows: 4, maxLength: 20000, placeholder: '要完成的任务。例如：为本项目写一个登录页，并检查安全问题。' });
     const mode = el('select', {}, Object.entries(MODE_NAMES).map(([id, label]) => el('option', { value: id, textContent: label })));
     const rounds = el('input', { type: 'number', min: 1, max: 4, value: 2, title: '圆桌轮数' });
     const rows = el('div', {}), output = el('div', {});
@@ -1423,6 +1490,42 @@
       } } })), err);
   }
 
+  // ---- 市场直接在首页主区域里打开（不再是单独的页面）：侧栏和顶栏保持原样，“市场”导航项高亮；点关闭、点别的导航项或对话就回到原来的内容 ----
+  let marketPanel = null;
+  let homeSettings = null;
+  function closeMarketPanel() { marketPanel?.remove(); marketPanel = null; homeSettings = null; document.querySelectorAll('.side-item.current').forEach(b => b.classList.remove('current')); }
+  // 个人设置 / 智能体：和市场一样放在首页主区域里（不跳页面、不弹独立窗口）；管理员另有一个“管理设置 →”入口去单独的管理页
+  async function openSettingsPanel(startTab, navKey) {
+    const main = document.querySelector('.main'), sidebar = document.querySelector('.sidebar');
+    if (!main) { location.href = '/settings' + (startTab && startTab !== 'usage' ? '?tab=' + startTab : ''); return; }
+    await refreshSession(); if (!me) return;
+    closeMarketPanel();
+    homeSettings = el('div', { class: 'team-main home-panel-body' }); tab = startTab;
+    marketPanel = el('section', { class: 'home-panel', 'aria-label': '设置' },
+      el('div', { class: 'home-panel-head' }, el('h2', { textContent: navKey === 'agents' ? '智能体' : '设置' }), el('span', { class: 'sp', style: 'flex:1' }),
+        me.role === 'admin' ? el('a', { class: 'secondary', href: '/admin/settings', textContent: '管理设置 →', style: 'text-decoration:none' }) : null,
+        el('button', { type: 'button', class: 'secondary', textContent: '✕ 关闭', on: { click: closeMarketPanel } })),
+      homeSettings);
+    main.append(marketPanel);
+    document.querySelector('.side-item[data-key=' + navKey + ']')?.classList.add('current');
+    document.querySelector('.app')?.classList.remove('menu-open');
+    if (sidebar && !sidebar.dataset.marketWatch) { sidebar.dataset.marketWatch = '1'; sidebar.addEventListener('click', e => { if (marketPanel && e.target.closest('.new,.chat,.chat-title,.sb-ws-row,.sb-run,.side-item:not([data-key=' + (document.querySelector('.side-item.current')?.dataset.key || 'market') + '])')) closeMarketPanel(); }); }
+    await render();
+  }
+  async function openMarketPanel() {
+    const main = document.querySelector('.main'), sidebar = document.querySelector('.sidebar');
+    if (!main) { location.href = '/market'; return; }
+    closeMarketPanel();
+    const box = flatBox(); box.classList.add('team-main', 'home-panel-body');   // 用 flatBox：市场页面里大量用数组和空值拼内容，普通 div 会把它们显示成 [object ...] / undefined
+    marketPanel = el('section', { class: 'home-panel', 'aria-label': '技能与机器人市场' },
+      el('div', { class: 'home-panel-head' }, el('h2', { textContent: '技能与机器人市场' }), el('button', { type: 'button', class: 'secondary', textContent: '✕ 关闭', on: { click: closeMarketPanel } })),
+      el('p', { class: 'team-desc', textContent: TAB_META.market[2] }), box);
+    main.append(marketPanel);
+    document.querySelector('.side-item[data-key=market]')?.classList.add('current');
+    document.querySelector('.app')?.classList.remove('menu-open');
+    if (sidebar && !sidebar.dataset.marketWatch) { sidebar.dataset.marketWatch = '1'; sidebar.addEventListener('click', e => { if (marketPanel && e.target.closest('.new,.chat,.chat-title,.side-item:not([data-key=market]),.sb-ws-row,.sb-run')) closeMarketPanel(); }); }
+    try { await renderMarket(box); } catch (e) { box.replaceChildren(el('div', { class: 'team-err', textContent: e.message })); }
+  }
   // ---------- 市场：技能与机器人模板 ----------
   let marketView = 'skills', marketQuery = '', marketSource = '';
   const publishToMarket = async (type, id, title) => {
