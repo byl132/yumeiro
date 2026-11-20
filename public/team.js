@@ -2238,20 +2238,24 @@
         m.role !== 'admin' && el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' },
           el('button', { type: 'button', class: 'secondary', textContent: m.disabled ? '启用' : '停用', on: { click: () => patch(m, { disabled: !m.disabled }) } }),
           el('button', { type: 'button', class: 'secondary', textContent: '额度', on: { click: async () => {
-            const v = await ymPrompt('额度：每日调用 / 每月调用 / 每月 Token / 每小时 Token（0=不限，用 / 分隔）', [m.dailyLimit, m.monthlyCallLimit, m.monthlyTokenLimit, m.hourlyTokenLimit || 0].join(' / '));
-            if (v === null) return;
-            const [d, c, t, h] = v.split('/').map(x => Number(x.trim() || 0));
-            patch(m, { dailyLimit: d, monthlyCallLimit: c ?? 0, monthlyTokenLimit: t ?? 0, hourlyTokenLimit: h ?? 0 });
+            const v = await ymForm('设置额度：' + (m.displayName || m.email), [
+              { name: 'daily', label: '每日调用次数', type: 'number', min: 0, value: m.dailyLimit || 0, hint: '0 = 不限' },
+              { name: 'monthlyCalls', label: '每月调用次数', type: 'number', min: 0, value: m.monthlyCallLimit || 0, hint: '0 = 不限' },
+              { name: 'monthlyTokens', label: '每月 Token', type: 'number', min: 0, value: m.monthlyTokenLimit || 0, hint: '0 = 不限' },
+              { name: 'hourlyTokens', label: '每小时 Token', type: 'number', min: 0, value: m.hourlyTokenLimit || 0, hint: '0 = 不限；按服务器本地整点计算' }], { okText: '保存' });
+            if (!v) return;
+            const n = x => Math.max(0, Math.floor(Number(x) || 0));
+            patch(m, { dailyLimit: n(v.daily), monthlyCallLimit: n(v.monthlyCalls), monthlyTokenLimit: n(v.monthlyTokens), hourlyTokenLimit: n(v.hourlyTokens) });
           } } }),
           el('button', { type: 'button', class: 'secondary', textContent: '使用时段', on: { click: async () => {
-            const v = await ymPrompt('允许使用的时段（服务器本地时间，24 小时制），格式 开始-结束，如 09:00-18:00；跨午夜可写 22:00-06:00；留空=不限制', m.allowedHours ? m.allowedHours.start + '-' + m.allowedHours.end : '');
-            if (v === null) return;
-            const text = v.replace(/[\s　]/g, '').replace(/[—–～~至到]/g, '-').replace(/：/g, ':');
-            if (!text) return patch(m, { allowedHours: null });
-            const hit = text.match(/^(\d{1,2}:\d{2})-(\d{1,2}:\d{2})$/);
-            if (!hit) return ymAlert('格式不对，应为 09:00-18:00');
-            const pad = t => t.padStart(5, '0');
-            patch(m, { allowedHours: { start: pad(hit[1]), end: pad(hit[2]) } });
+            const v = await ymForm('允许使用的时段：' + (m.displayName || m.email), [
+              { name: 'start', label: '开始', type: 'time', value: m.allowedHours?.start || '09:00', half: true, required: true },
+              { name: 'end', label: '结束', type: 'time', value: m.allowedHours?.end || '18:00', half: true, required: true }],
+              { message: '服务器本地时间。结束早于开始表示跨午夜，如 22:00 到 06:00。', okText: '保存', extra: { text: '不限制时段' } });
+            if (!v) return;
+            if (v.__extra) return patch(m, { allowedHours: null });
+            if (v.start === v.end) return ymAlert('开始和结束时间不能相同');
+            patch(m, { allowedHours: { start: v.start, end: v.end } });
           } } }),
           el('button', { type: 'button', class: 'secondary', textContent: '重置密码', on: { click: async () => { const v = await ymPrompt('新密码（至少 12 位）', '', { type: 'password', title: '重置密码' }); if (v) patch(m, { password: v }); } } }),
           el('button', { type: 'button', class: 'secondary', textContent: '删除', on: { click: async () => { if (!await ymConfirm('删除成员及其全部对话、令牌？不可恢复。', { danger: true, okText: '确定' })) return; try { await api('/api/admin/members/' + m.id, { method: 'DELETE' }); render(); } catch (e) { ymAlert(e.message); } } } })))));
