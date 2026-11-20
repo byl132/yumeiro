@@ -29,3 +29,40 @@
   let tries = 0;
   const timer = setInterval(() => { if (mount() || ++tries > 100) clearInterval(timer); }, 400);
 })();
+
+// 手机版：顶栏上十几个工具按钮（工具箱 / 文档 / 下载 / 宠物 / 调色 / 记忆 / 设置 / 退出…）收进一个“⋯ 工具”面板，顶栏只留菜单、标题和这一个按钮。
+// 按钮本身仍留在原处（别的脚本还在用），面板里的格子只是代点；每次打开时按当前有哪些按钮重新生成。
+(() => {
+  if (document.body?.dataset.page !== 'app' && !document.querySelector('.top-right')) return;
+  const mq = matchMedia('(max-width:760px)');
+  let panel = null, toggle = null;
+  const labelOf = b => { const t = (b.getAttribute('title') || b.getAttribute('aria-label') || b.textContent || '').trim(); return t.replace(/[（(].*$/, '').slice(0, 8) || '工具'; };
+  const iconOf = b => { const t = (b.textContent || '').trim(); return t && t.length <= 4 ? t : '⋯'; };
+  function close() { panel?.remove(); panel = null; toggle?.setAttribute('aria-expanded', 'false'); }
+  function open() {
+    close();
+    const buttons = [...document.querySelectorAll('.top-right button')].filter(b => b !== toggle && !b.hidden && getComputedStyle(b).display !== 'none');
+    panel = document.createElement('div'); panel.id = 'mobileToolsPanel'; panel.setAttribute('role', 'menu');
+    const status = document.getElementById('statusText')?.textContent || '';
+    if (status) { const s = document.createElement('div'); s.className = 'mt-status'; s.textContent = status; panel.append(s); }
+    const grid = document.createElement('div'); grid.className = 'mt-grid';
+    for (const b of buttons) {
+      const tile = document.createElement('button'); tile.type = 'button'; tile.className = 'mt-tile'; tile.disabled = b.disabled;
+      const i = document.createElement('span'); i.className = 'mt-i'; i.textContent = iconOf(b);
+      const l = document.createElement('span'); l.className = 'mt-l'; l.textContent = labelOf(b);
+      tile.append(i, l); tile.addEventListener('click', () => { close(); b.click(); }); grid.append(tile);
+    }
+    panel.append(grid); document.body.append(panel); toggle?.setAttribute('aria-expanded', 'true');
+    setTimeout(() => addEventListener('pointerdown', function off(e) { if (panel && !panel.contains(e.target) && e.target !== toggle && !toggle?.contains(e.target)) close(); if (!panel || !panel.isConnected) removeEventListener('pointerdown', off, true); }, true), 0);
+  }
+  function mountTools() {
+    const left = document.querySelector('.top-left'); if (!left || !mq.matches) { document.body.classList.remove('m-tools'); close(); return; }
+    if (!toggle || !toggle.isConnected) {
+      toggle = document.createElement('button'); toggle.id = 'mobileToolsButton'; toggle.type = 'button'; toggle.className = 'icon-button'; toggle.setAttribute('aria-label', '工具'); toggle.setAttribute('aria-haspopup', 'menu'); toggle.textContent = '⋯';
+      toggle.addEventListener('click', () => (panel ? close() : open())); left.append(toggle);
+    }
+    document.body.classList.add('m-tools');
+  }
+  mq.addEventListener?.('change', mountTools);
+  let tries = 0; const t = setInterval(() => { mountTools(); if (toggle?.isConnected || ++tries > 100) clearInterval(t); }, 400);
+})();

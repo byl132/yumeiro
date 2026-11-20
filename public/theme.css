@@ -118,3 +118,20 @@ html[data-theme=dark] body.settings-page .team-nav button.on{background:rgba(233
   body[data-page="app"] .composer textarea{height:52px;min-height:44px;background:transparent!important;padding:4px 2px 6px}
   body[data-page="app"] .composer-bottom .icon-button,body[data-page="app"] .composer-bottom button:not(.send){width:40px;height:40px}
 }
+
+/* ---- 手机版“⋯ 工具”面板：顶栏只留菜单 + 标题 + 一个按钮，其余工具按钮收进面板 ---- */
+@media(max-width:760px){
+  body.m-tools[data-page="app"] .topbar{height:52px;min-height:0;flex-wrap:nowrap;padding:0 10px}
+  body.m-tools[data-page="app"] .top-left{flex:1 1 auto}
+  body.m-tools[data-page="app"] .top-right{display:none!important}
+  body.m-tools #mobileToolsButton{margin-left:auto;width:38px;height:38px;font-size:20px;line-height:1;flex:none}
+  #mobileToolsPanel{position:fixed;left:10px;right:10px;top:56px;z-index:45;max-height:68vh;overflow:auto;padding:12px;border-radius:16px;background:var(--ym-card,var(--panel,#fff));color:var(--ink,#252832);border:1px solid var(--line,#e7e8ec);box-shadow:0 14px 40px #0004}
+  #mobileToolsPanel .mt-status{font-size:12px;color:var(--muted,#777b86);margin:0 2px 10px}
+  #mobileToolsPanel .mt-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+  #mobileToolsPanel .mt-tile{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;min-height:70px;padding:8px 2px;border:1px solid var(--line,#e7e8ec);border-radius:12px;background:transparent;color:inherit}
+  #mobileToolsPanel .mt-tile:active{background:var(--accent-soft,#fff0f2)}
+  #mobileToolsPanel .mt-tile:disabled{opacity:.4}
+  #mobileToolsPanel .mt-i{font-size:22px;line-height:1}
+  #mobileToolsPanel .mt-l{font-size:11px;color:var(--muted,#777b86);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+}
+@media(min-width:761px){#mobileToolsButton,#mobileToolsPanel{display:none!important}}
