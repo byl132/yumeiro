@@ -32,6 +32,20 @@ struct AgentOpt: Identifiable, Hashable { let id: String; let name: String; let 
 struct SkillItem: Identifiable, Hashable { let id: String; let title: String; let description: String; let content: String; let shared: Bool; let mine: Bool }
 struct MarketItem: Identifiable, Hashable { var id: String { key }; let key: String; let type: String; let title: String; let description: String; let author: String; var installed: Bool }
 struct Member: Identifiable, Hashable { let id: String; let email: String; let name: String; let disabled: Bool; let todayCalls: Int; let monthCalls: Int; let tokens: Int }
+struct WorkspaceMember: Identifiable, Hashable {
+    let id: String
+    let email: String
+    let name: String
+    let disabled: Bool
+}
+struct Workspace: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let createdAt: Double
+    let mine: Bool
+    let owner: String
+    var members: [WorkspaceMember]
+}
 struct McpItem: Identifiable { var id: String { name }; let name: String; let command: String; let enabled: Bool }
 struct Approval: Identifiable { var id: String { code }; let code: String; let ip: String; let ua: String; let expiresAt: Double }
 struct WallItem: Identifiable, Hashable { var id: String { name }; let name: String; let kind: String }
@@ -70,4 +84,4 @@ final class Pending: ObservableObject, Identifiable {
 }
 
 enum Screen { case loading, login, chat }
-enum Page: Hashable { case settings, agents, skills, market, admin, security }
+enum Page: Hashable { case settings, agents, skills, market, admin, security, workspace }

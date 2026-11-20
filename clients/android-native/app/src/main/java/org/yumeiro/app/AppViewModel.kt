@@ -60,11 +60,12 @@ class Pending(val name: String, val image: Boolean, val size: Long, val thumb: B
     val done get() = id.isNotEmpty()
 }
 
-enum class Screen { Loading, Login, Chat, Settings, Agents, Skills, Market, Admin, Security }
+enum class Screen { Loading, Login, Chat, Settings, Agents, Skills, Market, Admin, Security, Groups, GroupChat, GroupEdit }
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     val session = Session(app)
-    private val api = ApiClient(session)
+    internal val api = ApiClient(session)
+    val group = GroupState(this)
 
     var screen by mutableStateOf(Screen.Loading); private set
     var loginBusy by mutableStateOf(false); private set
@@ -116,7 +117,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun say(text: String) { toast = text }
 
-    private fun <T> io(block: () -> T, onError: (ApiException) -> Unit = { say(it.message ?: "出错了") }, onOk: (T) -> Unit = {}) {
+    internal fun <T> io(block: () -> T, onError: (ApiException) -> Unit = { say(it.message ?: "出错了") }, onOk: (T) -> Unit = {}) {
         viewModelScope.launch {
             try { val value = withContext(Dispatchers.IO) { block() }; onOk(value) }
             catch (e: ApiException) { if (e.status == 401) expired() else onError(e) }
@@ -124,6 +125,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    internal fun expiredPublic() = expired()
     private fun expired() { session.clearLogin(); passwordInput = ""; loginError = "登录已过期，请重新登录"; screen = Screen.Login }
 
     // ---- 登录 / 退出 ----

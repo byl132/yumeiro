@@ -129,7 +129,11 @@ fun SettingsScreen(vm: AppViewModel) {
             if (vm.isAdmin) vm.serviceUpdate?.let { update ->
                 val reminder = update.reachable && update.latest.isNotBlank() && update.installed.isNotBlank() && update.latest != update.installed
                 Card("服务更新", if (reminder) "有新的桌面端服务版本可用" else "管理员可在网页版执行更新") {
-                    Text(if (!update.enabled) "桌面端更新服务未启用" else if (!update.reachable) "暂时无法连接更新服务" else if (reminder) "当前 ${update.installed}，最新 ${update.latest}" else "当前版本 ${update.installed.ifBlank { "未知" }}"), color = if (reminder) Accent else Muted, fontSize = 13.sp)
+                    Text(
+                        if (!update.enabled) "桌面端更新服务未启用" else if (!update.reachable) "暂时无法连接更新服务" else if (reminder) "当前 ${update.installed}，最新 ${update.latest}" else "当前版本 ${update.installed.ifBlank { "未知" }}",
+                        color = if (reminder) Accent else Muted,
+                        fontSize = 13.sp
+                    )
                     if (update.message.isNotBlank()) Text(update.message, color = Muted, fontSize = 12.sp)
                     TextButton(onClick = { vm.loadServiceUpdate() }) { Text("刷新状态") }
                 }

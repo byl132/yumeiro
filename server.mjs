@@ -3,7 +3,7 @@ import { isIP, connect as tcpConnect } from 'node:net';
 import { randomBytes, randomUUID, createHash, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 import { Readable } from 'node:stream';
-import { createReadStream, readFileSync } from 'node:fs';
+import { createReadStream, readFileSync, existsSync } from 'node:fs';
 import { readFile, writeFile, rm, mkdir, stat as statFile, readdir as readDir, statfs } from 'node:fs/promises';
 import os from 'node:os';
 import dns from 'node:dns/promises';
@@ -31,7 +31,10 @@ import { VISION_LIMITS, VISION_DIALECTS, DEFAULT_VISION_MODELS, DEFAULT_PROMPT, 
 import { REMOTE_LIMITS, OS_LABELS, newPairCode, normalizePairCode, cleanInputEvents, countEvents, isJpeg, cleanDeviceName } from './remote.mjs';
 import { RECOVERY, newRecoveryKey, normalizeRecoveryKey, passwordProblem, createLimiter, createPhoneStore } from './recover.mjs';
 import { PROJECT_LIMITS, PROJECT_DIR, MANIFEST_NAME, mimeOf, renderMarkdownPage, signPreview, verifyPreview, previewHeaders, previewPath, manifestFor, planImport, localKit, cleanGuideMessages, parseGuideReply, guidePrompt } from './project.mjs';
-import { requestSetupHelper } from './setup/setup-client.mjs';
+import { requestSetupHelper, requestUpdater, updaterConfigured } from './setup/setup-client.mjs';
+import { UPDATE_MAX_BYTES, verifySignedUpdateZip, compareVersions as compareReleaseVersions } from './updatepkg.mjs';
+import { createWriteStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
 import { normalizeImageConfig, publicImageConfig, defaultImageConfig, imagesEndpoint, imageAuthHeaders, buildComfyWorkflow, comfyImageRefs, cleanImageRequest, buildImageRequest, parseImageResponse, sniffImage, safeResultUrl, DIALECTS as IMAGE_DIALECTS, BATCH_MODES, LIMITS as IMAGE_LIMITS } from './images.mjs';
 import { readPrefs, userMemories, upsertMemory, explicitRemember, selectMemories, relatedConversations, buildMemoryBlock, extractionMessages, parseExtraction, pendingSummaryRange, summaryMessages, cleanText, looksSecret, MEMORY_LIMITS } from './memory.mjs';
 await loadAsrExtras();
@@ -40,8 +43,8 @@ import { templates as providerTemplates, normalizeBaseUrl, chatEndpoint, slugify
 const scrypt=promisify(scryptCallback);
 const root=path.dirname(fileURLToPath(import.meta.url));
 const appVersion=(()=>{try{return JSON.parse(readFileSync(path.join(root,'package.json'),'utf8')).version||'未知'}catch{return '未知'}})();
-const updateSource='https://api.github.com/repos/yumeiro-ai/yumeiro/releases/latest';
-let updateCache={checkedAt:0,result:null};
+const updateSource=process.env.SERVICE_UPDATE_URL||'https://api.github.com/repos/yumeiro-ai/yumeiro/releases/latest';
+let updateCache={checkedAt:0,result:null},updateUploading=false;
 function compareVersions(a,b){const pa=String(a||'').replace(/^v/i,'').split('.').map(Number),pb=String(b||'').replace(/^v/i,'').split('.').map(Number);for(let i=0;i<3;i++){const d=(pa[i]||0)-(pb[i]||0);if(d)return d}return 0}
 async function latestServiceUpdate(){
   if(updateCache.result&&Date.now()-updateCache.checkedAt<10*60*1000)return updateCache.result;
@@ -54,7 +57,7 @@ async function latestServiceUpdate(){
     const result={currentVersion:appVersion,latestVersion:latest,updateAvailable:compareVersions(latest,appVersion)>0,releaseUrl:String(release.html_url||''),publishedAt:release.published_at||null,checkedAt:Date.now(),source:'GitHub Releases'};
     updateCache={checkedAt:Date.now(),result};return result;
   }catch(error){
-    const result={currentVersion:appVersion,latestVersion:null,updateAvailable:false,releaseUrl:'',publishedAt:null,checkedAt:Date.now(),source:'GitHub Releases',error:'暂时无法检查更新：'+(error.name==='TimeoutError'?'连接超时':'发布源不可达')};
+    const result={currentVersion:appVersion,latestVersion:null,updateAvailable:false,releaseUrl:'',publishedAt:null,checkedAt:Date.now(),source:'GitHub Releases',error:'暂时无法检查更新：'+(error.name==='TimeoutError'?'连接超时（服务器可能访问不了 GitHub）':/^HTTP 404/.test(error.message)?'GitHub 上还没有发布版本（HTTP 404）':/^HTTP /.test(error.message)?'发布源返回 '+error.message:'无法连接发布源（网络不通或被拦截）')};
     updateCache={checkedAt:Date.now(),result};return result;
   }
 }
@@ -162,7 +165,7 @@ const storage=await openStorage({key:storeKey,dataDir});
 let db=storage.db;
 console.log('数据存储：'+storage.describe);
 db.users||={};db.sessions||={};db.conversations||={};db.memories||={};db.images||={};db.attachments||={};db.remoteDevices||={};db.audit||=[];
-db.groups||={};db.usage||=[];db.security||={};db.tokens||={};db.agents||={};db.providers||={};db.settings||={};db.workspaces||={};db.runs||={};db.skills||={};db.bots||={};
+db.groups||={};db.groupStats||={};db.usage||=[];db.security||={};db.tokens||={};db.agents||={};db.providers||={};db.settings||={};db.workspaces||={};db.runs||={};db.skills||={};db.bots||={};
 db.security.loginPolicy||={adminAllowedIps:[],maxFailedAttempts:5,windowMinutes:15,maxSessions:5};
 db.security.events||=[];
 for(const user of Object.values(db.users))if(!user.role)user.role=user.passwordHash?'admin':'member';
@@ -589,16 +592,16 @@ async function refreshEnv(force=false){
   })();
   return envState.probing;
 }
-// 在封号风险发生之前拒绝：受限地区出口、调用过于密集、并发过高。守卫只会“拒绝”，不会去绕过任何风控。
+// 守卫只会“拒绝”：所在地区官方不支持、调用过于密集、并发过高时直接告知，不发出请求。
 function guardCheck(vendor,{user,req,what}={}){
   if(!vendor)return;
   const guard=guardConfig();if(!guard.enabled)return;
   const fail=(status,message)=>{addAudit(db,{userId:user?.id||null,action:'guard.block',target:vendor,detail:message,ip:req?clientIp(req):'',ok:false});throw Object.assign(new Error(message),{status,guard:true})};
   const result=envState.result;
-  if(result&&Date.now()-envState.at<30*60*1000&&result.egress?.country&&VENDORS[vendor]?.regions&&guard.restricted.includes(result.egress.country))fail(403,'已拒绝：服务器出口位于受限地区（'+result.egress.country+'），继续访问 '+VENDOR_NAMES[vendor]+' 可能导致账号被限制。请先在“环境检测”里按建议处理。');
+  if(result&&Date.now()-envState.at<30*60*1000&&result.egress?.country&&VENDORS[vendor]?.regions&&guard.restricted.includes(result.egress.country))fail(403,'该地区（'+result.egress.country+'）暂不支持使用 '+VENDOR_NAMES[vendor]+'，此处暂不可用。');
   if(what==='engine'){
     const usage=guardUsage()[vendor];
-    if(usage.lastHour>=guard.hourlyLimit)fail(429,'已拒绝：最近 1 小时 '+VENDOR_NAMES[vendor]+' 引擎已调用 '+usage.lastHour+' 次，达到上限 '+guard.hourlyLimit+'，为避免触发风控请稍后再试。');
+    if(usage.lastHour>=guard.hourlyLimit)fail(429,'已拒绝：最近 1 小时 '+VENDOR_NAMES[vendor]+' 引擎已调用 '+usage.lastHour+' 次，达到上限 '+guard.hourlyLimit+'，请稍后再试。');
     if(usage.concurrent>=guard.maxConcurrent)fail(429,'已拒绝：'+VENDOR_NAMES[vendor]+' 引擎并发已达上限 '+guard.maxConcurrent+'，请等当前任务结束。');
   }
 }
@@ -617,9 +620,8 @@ async function collectDoctor(req,user,deep){
   let passwordExists=false;if(passwordFilePath){try{passwordExists=(await statFile(passwordFilePath)).size>0}catch{}}
   let wallpapers=0;try{wallpapers=(await readDir(wallpapersDir)).length}catch{}
   const remoteAddress=req.socket.remoteAddress||'',forwardedSeen=Boolean(req.headers['x-forwarded-for']||req.headers['x-forwarded-proto']);
-  const envTask=envState.result?Promise.resolve(envState.result):refreshEnv().catch(()=>null);
   const load=os.loadavg();
-  const [writable,dnsResults,clock,env]=await Promise.all([writableTask,dnsTask,clockTask,envTask]);
+  const [writable,dnsResults,clock]=await Promise.all([writableTask,dnsTask,clockTask]);
   return {
     node:process.version,platform:os.platform(),arch:os.arch(),uptimeSec:process.uptime(),cpus:os.cpus().length,load1:load[0],
     memTotal:os.totalmem(),memFree:os.freemem(),rss:process.memoryUsage().rss,disk,writable,port,storage:storage.describe,hasStoreKey:Boolean(storeKey),
@@ -629,7 +631,7 @@ async function collectDoctor(req,user,deep){
     providers:{enabled:providers.length,defaultModel:ref,resolved:Boolean(ref&&resolveModel(ref,user)),probes},
     runner:{enabled:runnerEnabled,health:runnerEnabled?await runnerHealth(true):null},
     features:{voice:Boolean(asrConfig().enabled),tts:Boolean(ttsConfig().enabled),vision:Boolean(visionConfig().enabled),imagegen:Boolean(db.settings.imagegen?.enabled)},
-    dns:dnsResults,clock,env,downloads:Object.values(await listDownloads()).map(item=>item.name),wallpapers,
+    dns:dnsResults,clock,downloads:Object.values(await listDownloads()).map(item=>item.name),wallpapers,
     counts:{users:Object.keys(db.users).length,conversations:Object.keys(db.conversations).length,audit:db.audit.length}
   };
 }
@@ -712,17 +714,43 @@ const busyConversations=new Set();
 // 用量聚合：按成员 → 月/日累计，不受 db.usage 明细上限（10000 条）影响。时间按服务器本地时区。
 const pad=n=>String(n).padStart(2,'0');
 const monthKey=(at=Date.now())=>{const d=new Date(at);return d.getFullYear()+'-'+pad(d.getMonth()+1)};
+const hourKey=(at=Date.now())=>dayKey(at)+' '+pad(new Date(at).getHours());
+const hourTokens=userId=>db.stats[userId]?.hours?.[hourKey()]||0;
 const dayKey=(at=Date.now())=>{const d=new Date(at);return monthKey(at)+'-'+pad(d.getDate())};
-function addStat(userId,at,usage,model,source){
-  const stats=db.stats[userId]||={months:{},days:{}},month=stats.months[monthKey(at)]||={calls:0,inputTokens:0,outputTokens:0,totalTokens:0,unreportedCalls:0,models:{},sources:{}};
+// ---- 价格与费用：管理员按模型设置“每百万 Token”的输入 / 输出单价；费用在记录用量时按当时的价格算好，之后改价不影响历史 ----
+function priceOf(model){const table=db.settings.pricing?.models||{},ref=String(model||'');return table[ref]||table[ref.split('/').slice(1).join('/')]||null}
+function costOf(model,usage){
+  const price=priceOf(model);if(!price||!usage)return 0;
+  const split=usage.inputTokens!=null||usage.outputTokens!=null;
+  return split?((usage.inputTokens||0)*(price.input||0)+(usage.outputTokens||0)*(price.output||0))/1e6:((usage.totalTokens||0)*(price.input||0))/1e6;
+}
+const pricingCurrency=()=>String(db.settings.pricing?.currency||'¥').slice(0,6);
+const bumpBucket=(bucket,usage,cost)=>{
+  const input=usage?.inputTokens||0,output=usage?.outputTokens||0,total=usage?.totalTokens??(input+output);
+  bucket.calls=(bucket.calls||0)+1;bucket.inputTokens=(bucket.inputTokens||0)+input;bucket.outputTokens=(bucket.outputTokens||0)+output;bucket.totalTokens=(bucket.totalTokens||0)+(total||0);bucket.cost=(bucket.cost||0)+(cost||0);
+  return bucket;
+};
+function addStat(userId,at,usage,model,source,cost=0){
+  const stats=db.stats[userId]||={months:{},days:{}},month=stats.months[monthKey(at)]||={calls:0,inputTokens:0,outputTokens:0,totalTokens:0,cost:0,unreportedCalls:0,models:{},sources:{}};
   const total=usage?.totalTokens??((usage?.inputTokens||0)+(usage?.outputTokens||0));
-  month.calls++;month.inputTokens+=usage?.inputTokens||0;month.outputTokens+=usage?.outputTokens||0;month.totalTokens+=total||0;
+  month.calls++;month.inputTokens+=usage?.inputTokens||0;month.outputTokens+=usage?.outputTokens||0;month.totalTokens+=total||0;month.cost=(month.cost||0)+cost;
   if(!usage||usage.totalTokens==null)month.unreportedCalls++;
-  const m=month.models[model]||={calls:0,totalTokens:0};m.calls++;m.totalTokens+=total||0;
+  bumpBucket(month.models[model]||={calls:0,totalTokens:0},usage,cost);
   month.sources[source]=(month.sources[source]||0)+1;
+  if(source==='pet')bumpBucket(month.pet||={},usage,cost); // 宠物 AI 单独计量
   const day=dayKey(at);stats.days[day]=(stats.days[day]||0)+1;
+  const hours=stats.hours||={},hour=hourKey(at);hours[hour]=(hours[hour]||0)+(total||0);
+  const hourCutoff=hourKey(at-48*3600*1000);for(const key of Object.keys(hours))if(key<hourCutoff)delete hours[key];
   const cutoff=dayKey(at-40*24*60*60*1000);
   for(const key of Object.keys(stats.days))if(key<cutoff)delete stats.days[key];
+}
+// 群聊用量：按“群 → 月 → 成员（智能体）× 模型”累计，群被删除后报表里仍保留
+function addGroupStat(group,at,label,model,usage,cost){
+  db.groupStats||={};
+  const entry=db.groupStats[group.id]||={title:group.title,ownerId:group.userId,months:{}};
+  entry.title=group.title;
+  const month=entry.months[monthKey(at)]||={rows:{}};
+  bumpBucket(month.rows[label+'\u0000'+model]||={label,model},usage,cost);
 }
 if(!db.stats){
   db.stats={};
@@ -730,19 +758,36 @@ if(!db.stats){
   if(db.usage.length)console.log('已从 '+db.usage.length+' 条旧用量明细生成月度统计（仅覆盖明细保留的范围）。');
   await persist();
 }
-function recordUsage(userId,usage,model=defaultModelRef(),source="web"){
-  const at=Date.now();
-  db.usage.push({id:randomUUID(),userId,at,model,source,inputTokens:usage?.inputTokens??null,outputTokens:usage?.outputTokens??null,totalTokens:usage?.totalTokens??null});
+function recordUsage(userId,usage,model=defaultModelRef(),source="web",meta=null){
+  const at=Date.now(),cost=costOf(model,usage);
+  db.usage.push({id:randomUUID(),userId,at,model,source,inputTokens:usage?.inputTokens??null,outputTokens:usage?.outputTokens??null,totalTokens:usage?.totalTokens??null,cost,...(meta?.groupId?{groupId:meta.groupId,label:meta.label}:{})});
   if(db.usage.length>10000)db.usage.splice(0,db.usage.length-10000);
-  addStat(userId,at,usage,model,source);
+  addStat(userId,at,usage,model,source,cost);
+  if(meta?.groupId&&db.groups[meta.groupId])addGroupStat(db.groups[meta.groupId],at,meta.label||'成员',model,usage,cost);
   addAudit(db,{userId,action:'call.'+source,target:model,detail:usage?.totalTokens!=null?'tokens '+usage.totalTokens:''},at);
 }
-const emptyMonth=()=>({calls:0,inputTokens:0,outputTokens:0,totalTokens:0,unreportedCalls:0,models:{},sources:{}});
+const emptyMonth=()=>({calls:0,inputTokens:0,outputTokens:0,totalTokens:0,cost:0,unreportedCalls:0,models:{},sources:{}});
 const monthStat=(userId,key=monthKey())=>db.stats[userId]?.months[key]||emptyMonth();
 const dailyCalls=userId=>db.stats[userId]?.days[dayKey()]||0;
 // 返回超额原因；null 表示可以继续。Token 额度按已记录用量判断，单次调用可能略微超出。
+// 成员使用时段：user.allowedHours={start:'HH:MM',end:'HH:MM'}（服务器本地时间）；start>end 表示跨午夜，如 22:00–06:00
+const HHMM=/^([01]\d|2[0-3]):[0-5]\d$/;
+function inAllowedHours(window,at=new Date()){
+  if(!window?.start||!window?.end)return true;
+  const toMinutes=text=>Number(text.slice(0,2))*60+Number(text.slice(3,5)),now=at.getHours()*60+at.getMinutes(),start=toMinutes(window.start),end=toMinutes(window.end);
+  return start<end?now>=start&&now<end:now>=start||now<end;
+}
+function readAllowedHours(body){
+  if(body.allowedHours===undefined)return {};
+  const value=body.allowedHours;
+  if(value===null||value===''||value===false)return {allowedHours:null};
+  if(typeof value!=='object'||!HHMM.test(String(value.start||''))||!HHMM.test(String(value.end||''))||value.start===value.end)throw fail(400,'使用时段格式应为 {"start":"09:00","end":"18:00"}，开始和结束不能相同');
+  return {allowedHours:{start:value.start,end:value.end}};
+}
 function quotaError(user){
+  if(user.role!=='admin'&&!inAllowedHours(user.allowedHours))return '当前不在主账号设置的使用时段（'+user.allowedHours.start+'–'+user.allowedHours.end+'）内，请在时段内使用';
   if(user.dailyLimit>0&&dailyCalls(user.id)>=user.dailyLimit)return '今日调用次数已达主账号设置的上限';
+  if(user.hourlyTokenLimit>0&&hourTokens(user.id)>=user.hourlyTokenLimit)return '本小时 Token 用量已达主账号设置的上限，请下个整点后再用';
   const month=monthStat(user.id);
   if(user.monthlyCallLimit>0&&month.calls>=user.monthlyCallLimit)return '本月调用次数已达主账号设置的额度';
   if(user.monthlyTokenLimit>0&&month.totalTokens>=user.monthlyTokenLimit)return '本月 Token 用量已达主账号设置的额度';
@@ -752,17 +797,17 @@ function quotaError(user){
 const warnPercent=Math.min(99,Math.max(50,Math.floor(Number(process.env.QUOTA_WARN_PERCENT))||80));
 function quotaAlerts(user){
   const month=monthStat(user.id);
-  return [['daily','今日调用',dailyCalls(user.id),user.dailyLimit],['monthlyCalls','本月调用',month.calls,user.monthlyCallLimit],['monthlyTokens','本月 Token',month.totalTokens,user.monthlyTokenLimit]]
+  return [['hourlyTokens','本小时 Token',hourTokens(user.id),user.hourlyTokenLimit],['daily','今日调用',dailyCalls(user.id),user.dailyLimit],['monthlyCalls','本月调用',month.calls,user.monthlyCallLimit],['monthlyTokens','本月 Token',month.totalTokens,user.monthlyTokenLimit]]
     .filter(([,,,limit])=>limit>0)
     .map(([key,label,used,limit])=>({key,label,used,limit,percent:Math.floor(used/limit*100)}))
     .filter(item=>item.percent>=warnPercent)
     .map(item=>({...item,level:item.percent>=100?'exceeded':'warning'}));
 }
 const alertHeader=alerts=>alerts.length?{'X-Yumeiro-Quota-Warning':alerts.map(item=>item.key+'='+item.percent+'%').join('; ')}:{};
-const quotaView=user=>({dailyLimit:user.dailyLimit||0,monthlyCallLimit:user.monthlyCallLimit||0,monthlyTokenLimit:user.monthlyTokenLimit||0});
+const quotaView=user=>({allowedHours:user.allowedHours||null,hourlyTokenLimit:user.hourlyTokenLimit||0,dailyLimit:user.dailyLimit||0,monthlyCallLimit:user.monthlyCallLimit||0,monthlyTokenLimit:user.monthlyTokenLimit||0});
 // ---- 团队、智能体与 API 令牌 ----
 const fail=(status,message)=>Object.assign(new Error(message),{status});
-const limitFields={dailyLimit:[100000,'每日调用上限'],monthlyCallLimit:[10000000,'每月调用上限'],monthlyTokenLimit:[10000000000,'每月 Token 上限']};
+const limitFields={hourlyTokenLimit:[1000000000,'每小时 Token 上限'],dailyLimit:[100000,'每日调用上限'],monthlyCallLimit:[10000000,'每月调用上限'],monthlyTokenLimit:[10000000000,'每月 Token 上限']};
 function readLimits(body){
   const out={};
   for(const [key,[max,label]]of Object.entries(limitFields)){
@@ -799,6 +844,7 @@ function removeUserData(userId){
   for(const [key,value]of Object.entries(db.tokens))if(value.userId===userId)delete db.tokens[key];
   for(const [key,value]of Object.entries(db.conversations))if(value.userId===userId)delete db.conversations[key];
   for(const [key,value]of Object.entries(db.groups||{}))if(value.userId===userId)delete db.groups[key];
+  for(const [key,value]of Object.entries(db.groupStats||{}))if(value.ownerId===userId)delete db.groupStats[key];
   for(const [key,value]of Object.entries(db.agents))if(value.ownerId===userId)delete db.agents[key];
   for(const [key,value]of Object.entries(db.memories))if(value.userId===userId||value.ownerId===userId)delete db.memories[key];
   delete db.stats[userId];
@@ -958,6 +1004,25 @@ const sandboxBusy=new Set();
 const busyGroups=new Set(),activeGroupRuns=new Map(),GROUP_MAX_MESSAGES=500;
 const GROUP_MODES=['pm','chat','roundtable','pipeline','supervisor'];
 const PM_DEFAULT_ROLE='产品经理：理解用户目标，按成员的身份和擅长拆解并分配任务，整合成果后答复用户。';
+// 汇总某个群在某月（month 为空=全部月份）的用量：总计、按成员、按模型
+const addRow=(target,row)=>{target.calls+=row.calls||0;target.inputTokens+=row.inputTokens||0;target.outputTokens+=row.outputTokens||0;target.totalTokens+=row.totalTokens||0;target.cost+=row.cost||0};
+const emptyRow=extra=>({calls:0,inputTokens:0,outputTokens:0,totalTokens:0,cost:0,...extra});
+function summarizeGroupRows(entry,month){
+  const rows=[];
+  for(const [key,value]of Object.entries(entry?.months||{}))if(!month||key===month)rows.push(...Object.values(value.rows||{}));
+  const total=emptyRow(),byMember={},byModel={};
+  for(const row of rows){
+    addRow(total,row);
+    addRow(byMember[row.label]||=emptyRow({label:row.label}),row);
+    addRow(byModel[row.model]||=emptyRow({model:row.model}),row);
+  }
+  return {total,members:Object.values(byMember).sort((a,b)=>b.totalTokens-a.totalTokens),models:Object.values(byModel).sort((a,b)=>b.totalTokens-a.totalTokens),rows};
+}
+function groupUsageReport(groupId,month){
+  const entry=db.groupStats?.[groupId];
+  return {month,currency:pricingCurrency(),priced:Object.keys(db.settings.pricing?.models||{}).length>0,thisMonth:summarizeGroupRows(entry,month),allTime:summarizeGroupRows(entry,null)};
+}
+const providerOfRef=ref=>String(ref).includes('/')?String(ref).split('/')[0]:'内置';
 const safeGroup=group=>({id:group.id,title:group.title,createdAt:group.createdAt,updatedAt:group.updatedAt,mode:group.mode,rounds:group.rounds,count:group.messages.length,pm:group.pm?{label:group.pm.label,agentId:group.pm.agentId||null,model:group.pm.model||null}:null,members:group.members.map(member=>({strengths:member.strengths||'',label:member.label,agentId:member.agentId||null,agentName:member.agentId?db.agents[member.agentId]?.name||'（智能体已删除）':null,model:member.model||null,role:member.role||''}))});
 function parseGroupBody(body,user,existing){
   const title=String(body.title??existing?.title??'').replace(/\s+/g,' ').trim().slice(0,60);
@@ -1795,7 +1860,7 @@ async function handlePreview(req,res,pathname){
   const headers=previewHeaders(type),length=upstream.headers.get('content-length');if(length)headers['Content-Length']=length;
   res.writeHead(200,headers);Readable.fromWeb(upstream.body).pipe(res);
 }
-const guideDay=new Map(),guideBusy=new Set(),petLineHits=new Map(),petSenseHits=new Map(),petStickerHits=new Map(),sideAiHits=new Map();
+const guideDay=new Map(),guideBusy=new Set(),petLineHits=new Map(),petSenseHits=new Map(),petStickerHits=new Map(),petChatHits=new Map(),sideAiHits=new Map();
 // 侧边栏的便签 / 待办 / 片段同步：每人一份，按 id 合并（u = 最后修改时间，删除记在 del），多台设备同时改不会互相覆盖。规则和 public/side-tools.js 的 mergeSide 一致。
 function cleanSideData(input){
   const src=input&&typeof input==='object'?input:{};
@@ -2097,7 +2162,7 @@ const server=http.createServer(async(req,res)=>{
         const body=await readBody(req,4096),token=String(body.token||'').trim();
         const ok=token.length>=32&&setupTokenDigest&&timingSafeEqual(Buffer.from(sha(token)),Buffer.from(setupTokenDigest));
         if(!ok){await recordSecurityEvent('setup_token_failed',req,null,{});return setupError(res,401,'安装令牌无效或已过期')}
-        const safeTemplates=providerTemplates.map(({id,name,baseUrl,keyHint,keyOptional,note})=>({id,name,baseUrl,keyHint,keyOptional:Boolean(keyOptional),note}));return json(res,200,{authorized:true,profile:'full-native',actions:setupPublicStatus().actions,templates:safeTemplates});
+        const safeTemplates=providerTemplates.map(({id,name,baseUrl,keyHint,keyOptional,note})=>({id,name,baseUrl,keyHint,keyOptional:Boolean(keyOptional),note}));const sessionToken=randomBytes(32).toString('base64url');setupSessions.set(sha(sessionToken),{expiresAt:Date.now()+30*60*1000});setupCookie(res,sessionToken,30*60);return json(res,200,{authorized:true,profile:'full-native',actions:setupPublicStatus().actions,templates:safeTemplates});
       }
       const setup=setupSession(req);if(!setup)return setupError(res,401,'安装会话已过期，请重新授权');
       if(pathname==='/api/setup/providers/probe'&&req.method==='POST'){
@@ -2341,7 +2406,65 @@ const server=http.createServer(async(req,res)=>{
     }
     if(pathname==='/api/admin/service-update'&&req.method==='GET'){
       if(!isAdmin)return adminOnly();
-      return json(res,200,{...(await latestServiceUpdate()),setupCompleted:db.settings.setup?.status==='completed',nativeCommand:'sudo bash /opt/yumeiro/deploy/yumeiro-native.sh update',dockerCommand:'docker compose up -d --build yumeiro',message:'发布新版本后，先备份数据，再执行对应部署方式的更新；更新会重启服务。'});
+      return json(res,200,{...(await latestServiceUpdate()),setupCompleted:db.settings.setup?.status==='completed',nativeCommand:'cd <新版本解压出来的目录> && sudo bash deploy/yumeiro-native.sh update',dockerCommand:'docker compose up -d --build yumeiro',message:'发布新版本后，先备份数据，再执行对应部署方式的更新；更新会重启服务。'});
+    }
+    // ---- 压缩包更新：管理员上传新版发布包 + 粘贴发布页上的 SHA256，校验值对上才允许更新，不需要在服务器上敲命令 ----
+    // 只在原生安装且启用了“更新助手”（yumeiro-setup-helper，root）时可用；助手会再次校验、先备份、起不来自动回滚，和命令行 update 完全一致。
+    const updatesDir=path.join(dataDir,'updates'),pendingFile=path.join(updatesDir,'pending.json');
+    const readPending=async()=>{try{return JSON.parse(await readFile(pendingFile,'utf8'))}catch{return null}};
+    const dropPending=async()=>{const old=await readPending();if(old?.file)await rm(path.join(updatesDir,old.file),{force:true}).catch(()=>{});await rm(pendingFile,{force:true}).catch(()=>{})};
+    const publicPending=item=>item?{name:item.name,size:item.size,sha256:item.sha256,signed:true,version:item.version,withClients:Boolean(item.withClients),uploadedAt:item.uploadedAt,newer:compareReleaseVersions(item.version,appVersion)>0}:null;
+    // 更新由谁执行：Docker 部署用“更新器”容器（UPDATER_URL），原生安装用 root 更新助手
+    const updateExecutor=updaterConfigured()?requestUpdater:requestSetupHelper,inDocker=Boolean(process.env.UPDATER_URL)||existsSync('/.dockerenv');
+    const helperState=async()=>{try{return {available:true,status:(await updateExecutor({action:'update_status',jobId:randomUUID()})).details}}catch(error){return {available:false,reason:updaterConfigured()?'更新器没有运行':inDocker?'Docker 部署还没有启用更新器':/token|未启用/.test(error.message)?'没有启用更新助手':'更新助手没有运行',status:{state:'idle'}}}};
+    if(pathname==='/api/admin/service-update/status'&&req.method==='GET'){
+      if(!isAdmin)return adminOnly();
+      const helper=await helperState();
+      return json(res,200,{available:helper.available,reason:helper.reason||'',status:helper.status,currentVersion:appVersion,pending:publicPending(await readPending())});
+    }
+    if(pathname==='/api/admin/service-update/upload'&&req.method==='PUT'){
+      if(!isAdmin)return adminOnly();
+      const helper=await helperState();
+      if(!helper.available)return json(res,409,{error:'这台服务器不能在网页里更新：'+helper.reason+'。'+(inDocker?'Docker 部署请在安装目录运行 ./install.sh enable-updater 启用更新器（只需一次），之后就能在网页里更新。':'原生安装请用 sudo bash deploy/yumeiro-native.sh update。')});
+      if(helper.status.state==='running')return json(res,409,{error:'已有更新正在进行'});
+      const fileName=String(req.headers['x-file-name']?decodeURIComponent(String(req.headers['x-file-name'])):'update.zip').replace(/[\\/\u0000-\u001f]/g,'_').slice(0,120);
+      const declared=Number(req.headers['content-length']||0);
+      if(!declared||declared>UPDATE_MAX_BYTES)return json(res,413,{error:'压缩包大小无效或超过 '+Math.round(UPDATE_MAX_BYTES/1048576)+' MB'});
+      if(updateUploading)return json(res,409,{error:'正在上传另一个压缩包'});
+      updateUploading=true;
+      const id=randomUUID(),file='incoming-'+id+'.zip',target=path.join(updatesDir,file),hash=createHash('sha256');let size=0;
+      try{
+        await mkdir(updatesDir,{recursive:true,mode:0o750});await dropPending();
+        const counter=async function*(source){for await(const chunk of source){size+=chunk.length;if(size>UPDATE_MAX_BYTES)throw Object.assign(new Error('压缩包过大'),{status:413});hash.update(chunk);yield chunk}};
+        await pipeline(req,counter,createWriteStream(target,{mode:0o640}));
+        // 程序自己核实：官方签名 + 包内每个文件都和签名清单一致。不依赖任何人手填的校验值。
+        let info;
+        try{info=await verifySignedUpdateZip(target)}
+        catch(error){await rm(target,{force:true});addAudit(db,{userId:session.user.id,action:'service.update_rejected',target:fileName,detail:String(error.message).slice(0,200),ip:clientIp(req),ok:false});await persist();return json(res,400,{error:error.message,rejected:true})}
+        const item={file,name:fileName,size,sha256:hash.digest('hex'),version:info.version,withClients:info.withClients,uploadedAt:Date.now(),by:session.user.id};
+        await writeFile(pendingFile,JSON.stringify(item),{mode:0o640});
+        addAudit(db,{userId:session.user.id,action:'service.update_uploaded',target:fileName,detail:'版本 '+info.version+' · 官方签名验证通过',ip:clientIp(req)});await persist();
+        return json(res,200,{pending:publicPending(item),currentVersion:appVersion});
+      }catch(error){await rm(target,{force:true}).catch(()=>{});return json(res,error.status||500,{error:error.status?error.message:'上传失败：'+error.message})}
+      finally{updateUploading=false}
+    }
+    if(pathname==='/api/admin/service-update/apply'&&req.method==='POST'){
+      if(!isAdmin)return adminOnly();
+      const body=await readBody(req),pending=await readPending();
+      if(!pending)return json(res,404,{error:'还没有上传压缩包，或已被清除'});
+      if(body.confirm!==true)return json(res,400,{error:'需要确认：更新会备份数据并重启服务'});
+      const downgrade=compareReleaseVersions(pending.version,appVersion)<=0;
+      if(downgrade&&body.allowDowngrade!==true)return json(res,400,{error:'这个压缩包的版本（'+pending.version+'）不高于当前版本（'+appVersion+'）。确需降级请勾选“允许降级”。'});
+      try{
+        const result=await updateExecutor({action:'apply_update',jobId:randomUUID(),update:{file:pending.file,sha256:pending.sha256,allowDowngrade:body.allowDowngrade===true}});
+        addAudit(db,{userId:session.user.id,action:'service.update',target:pending.name,detail:appVersion+' → '+pending.version,ip:clientIp(req)});await persist();
+        await rm(pendingFile,{force:true}).catch(()=>{});
+        return json(res,202,{started:true,from:appVersion,to:pending.version,message:result.message});
+      }catch(error){return json(res,502,{error:'没能开始更新：'+error.message})}
+    }
+    if(pathname==='/api/admin/service-update/pending'&&req.method==='DELETE'){
+      if(!isAdmin)return adminOnly();
+      await dropPending();return json(res,200,{ok:true});
     }
     // AI 服务商接入（管理员）与可用模型列表（所有登录用户）
     if(pathname==='/api/models'&&req.method==='GET'&&(refreshCindyModelsInBackground(session.user)||true))return json(res,200,{models:modelCatalog(session.user),defaultModel:defaultModelRef(session.user)});
@@ -2392,7 +2515,7 @@ const server=http.createServer(async(req,res)=>{
     if(pathname==='/api/admin/members'&&req.method==='POST'){
       if(!isAdmin)return adminOnly();
       if(appMode()==='personal')return personalOnly(res);
-      const body=await readBody(req),email=String(body.email||'').trim().toLowerCase(),password=String(body.password||''),limits=readLimits(body);
+      const body=await readBody(req),email=String(body.email||'').trim().toLowerCase(),password=String(body.password||''),limits={...readLimits(body),...readAllowedHours(body)};
       if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||email.length>254)return json(res,400,{error:'邮箱格式无效'});
       if(password.length<12||password.length>200)return json(res,400,{error:'成员初始密码至少 12 个字符'});
       if(Object.values(db.users).some(user=>user.email===email))return json(res,409,{error:'该邮箱已存在'});
@@ -2435,14 +2558,43 @@ const server=http.createServer(async(req,res)=>{
       const body=await readBody(req);
       if(body.disabled!==undefined){if(typeof body.disabled!=='boolean')return json(res,400,{error:'disabled 必须是布尔值'});user.disabled=body.disabled}
       if(body.displayName!==undefined)user.displayName=String(body.displayName).trim().slice(0,60)||user.email;
-      Object.assign(user,readLimits(body));
+      Object.assign(user,readLimits(body),readAllowedHours(body));
       if(body.password!==undefined){const password=String(body.password);if(password.length<12||password.length>200)return json(res,400,{error:'密码至少 12 个字符'});user.passwordHash=await hashPassword(password)}
       if(user.disabled||body.password!==undefined)for(const [key,value]of Object.entries(db.sessions))if(value.userId===user.id)delete db.sessions[key];
       await persist();await recordSecurityEvent('member_updated',req,session.user.id,{targetUserId:user.id});
       return json(res,200,{member:safeMember(user)});
     }
     // 用量统计
-    const usageRow=(user,key)=>({id:user.id,email:user.email,displayName:user.displayName||user.email,role:user.role,disabled:Boolean(user.disabled),...quotaView(user),todayCalls:dailyCalls(user.id),...monthStat(user.id,key)});
+    const modelUsageRows=key=>{
+      const byModel={};
+      for(const stat of Object.values(db.stats)){const month=stat.months?.[key];if(!month)continue;for(const [model,value]of Object.entries(month.models||{}))addRow(byModel[model]||=emptyRow({model,provider:providerOfRef(model)}),value)}
+      return Object.values(byModel).sort((a,b)=>b.totalTokens-a.totalTokens);
+    };
+    const groupUsageRows=key=>Object.entries(db.groupStats||{}).map(([id,entry])=>{const summary=summarizeGroupRows(entry,key);return {id,title:entry.title,owner:db.users[entry.ownerId]?.email||'',deleted:!db.groups[id],...summary.total,members:summary.members}}).filter(item=>item.calls>0).sort((a,b)=>b.totalTokens-a.totalTokens);
+    const csvCell=value=>{let text=String(value??'');if(/^[=+\-@\t\r]/.test(text))text="'"+text;return /[",\n\r]/.test(text)?'"'+text.replace(/"/g,'""')+'"':text};
+    const csvLine=cells=>cells.map(csvCell).join(',');
+    const money=value=>String(Math.round((value||0)*1e6)/1e6);
+    function usageCsv(by,key){
+      const head=['月份','调用次数','输入 Token','输出 Token','总 Token','费用（'+pricingCurrency()+'）'],lines=[];
+      if(by==='member'){
+        lines.push(csvLine(['成员','邮箱','模型',...head]));
+        for(const user of Object.values(db.users).filter(item=>item.passwordHash)){
+          const month=db.stats[user.id]?.months?.[key];if(!month)continue;
+          for(const [model,value]of Object.entries(month.models||{}))lines.push(csvLine([user.displayName||user.email,user.email,model,key,value.calls||0,value.inputTokens||0,value.outputTokens||0,value.totalTokens||0,money(value.cost)]));
+        }
+      }else if(by==='group'){
+        lines.push(csvLine(['群聊','创建者','成员（智能体）','模型',...head]));
+        for(const [id,entry]of Object.entries(db.groupStats||{})){
+          const owner=db.users[entry.ownerId]?.email||'',title=entry.title+(db.groups[id]?'':'（已删除）');
+          for(const row of summarizeGroupRows(entry,key).rows)lines.push(csvLine([title,owner,row.label,row.model,key,row.calls||0,row.inputTokens||0,row.outputTokens||0,row.totalTokens||0,money(row.cost)]));
+        }
+      }else{
+        lines.push(csvLine(['模型','服务商',...head]));
+        for(const row of modelUsageRows(key))lines.push(csvLine([row.model,row.provider,key,row.calls,row.inputTokens,row.outputTokens,row.totalTokens,money(row.cost)]));
+      }
+      return lines.join('\r\n')+'\r\n';
+    }
+    const usageRow=(user,key)=>({id:user.id,email:user.email,displayName:user.displayName||user.email,role:user.role,disabled:Boolean(user.disabled),...quotaView(user),todayCalls:dailyCalls(user.id),hourTokens:hourTokens(user.id),...monthStat(user.id,key)});
     if(pathname==='/api/usage/me'&&req.method==='GET'){
       const user=session.user,history=Object.entries(db.stats[user.id]?.months||{}).sort().slice(-6).map(([month,value])=>({month,calls:value.calls,totalTokens:value.totalTokens}));
       return json(res,200,{month:monthKey(),usage:usageRow(user,monthKey()),history,blocked:quotaError(user),alerts:quotaAlerts(user),warnPercent});
@@ -2453,7 +2605,40 @@ const server=http.createServer(async(req,res)=>{
       if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(key))return json(res,400,{error:'month 格式应为 YYYY-MM'});
       const rows=Object.values(db.users).filter(user=>user.passwordHash).map(user=>usageRow(user,key)).sort((a,b)=>b.totalTokens-a.totalTokens||b.calls-a.calls);
       const months=[...new Set(Object.values(db.stats).flatMap(item=>Object.keys(item.months)).concat(monthKey()))].sort().reverse();
-      return json(res,200,{month:key,months,rows,totals:{calls:rows.reduce((s,r)=>s+r.calls,0),totalTokens:rows.reduce((s,r)=>s+r.totalTokens,0),unreportedCalls:rows.reduce((s,r)=>s+r.unreportedCalls,0)}});
+      return json(res,200,{month:key,months,rows,currency:pricingCurrency(),models:modelUsageRows(key),groups:groupUsageRows(key),totals:{calls:rows.reduce((s,r)=>s+r.calls,0),totalTokens:rows.reduce((s,r)=>s+r.totalTokens,0),cost:rows.reduce((s,r)=>s+(r.cost||0),0),unreportedCalls:rows.reduce((s,r)=>s+r.unreportedCalls,0)}});
+    }
+    // 报表导出（CSV，Excel 可直接打开）：by=member 成员×模型；by=group 群聊×成员×模型；by=model 各模型（每个 API 服务商）的 Token 与费用
+    if(pathname==='/api/admin/usage/export'&&req.method==='GET'){
+      if(!isAdmin)return adminOnly();
+      const key=url.searchParams.get('month')||monthKey(),by=url.searchParams.get('by')||'member';
+      if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(key))return json(res,400,{error:'month 格式应为 YYYY-MM'});
+      if(!['member','group','model'].includes(by))return json(res,400,{error:'by 只能是 member、group 或 model'});
+      const csv=usageCsv(by,key);
+      addAudit(db,{userId:session.user.id,action:'usage.export',target:by+' '+key,detail:'导出用量报表',ip:clientIp(req)});await persist();
+      res.writeHead(200,{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="usage-'+by+'-'+key+'.csv"','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
+      return res.end('\uFEFF'+csv);
+    }
+    // 模型价格：每百万 Token 的输入 / 输出单价；没填价格的模型只统计 Token，不算费用
+    if(pathname==='/api/admin/pricing'&&req.method==='GET'){
+      if(!isAdmin)return adminOnly();
+      const seen=new Set(),models=[];
+      for(const item of modelCatalog(session.user)){if(seen.has(item.ref))continue;seen.add(item.ref);models.push({ref:item.ref,label:item.label||item.model,providerName:item.providerName,price:db.settings.pricing?.models?.[item.ref]||null})}
+      for(const [ref,price]of Object.entries(db.settings.pricing?.models||{}))if(!seen.has(ref))models.push({ref,label:ref,providerName:'（已不在列表中）',price});
+      return json(res,200,{currency:pricingCurrency(),models});
+    }
+    if(pathname==='/api/admin/pricing'&&req.method==='PUT'){
+      if(!isAdmin)return adminOnly();
+      const body=await readBody(req),table={};
+      if(!body.models||typeof body.models!=='object'||Array.isArray(body.models))return json(res,400,{error:'models 需要是 {模型: {input, output}} 对象'});
+      for(const [ref,price]of Object.entries(body.models).slice(0,500)){
+        if(!price)continue;
+        const input=Number(price.input||0),output=Number(price.output||0);
+        if(![input,output].every(n=>Number.isFinite(n)&&n>=0&&n<=1e6))return json(res,400,{error:'价格必须是 0–1000000 的数字：'+ref});
+        if(input||output)table[String(ref).slice(0,200)]={input,output};
+      }
+      db.settings.pricing={currency:String(body.currency||'¥').trim().slice(0,6)||'¥',models:table};
+      addAudit(db,{userId:session.user.id,action:'settings.pricing',target:'pricing',detail:'已设置 '+Object.keys(table).length+' 个模型的价格',ip:clientIp(req)});await persist();
+      return json(res,200,{currency:pricingCurrency(),count:Object.keys(table).length});
     }
     // 智能体引擎（Claude Code / Codex / Pi）：主管理员配置；成员只看到被放行且已安装的
     if(pathname==='/api/engines'&&req.method==='GET'){
@@ -2710,6 +2895,34 @@ const server=http.createServer(async(req,res)=>{
       const body=await readBody(req,24*1024),merged=mergePetMemory(current,cleanPetMemory(body.memory));
       user.petMemory=merged;await persist();return json(res,200,{memory:merged});
     }
+    // 宠物 AI 可以单独选模型：mode=main 用主 AI（当前默认模型），mode=own 用自己选的模型；用量记在“桌宠”名下单独统计
+    const petModelRef=user=>{const own=user.petAi;if(own?.mode==='own'&&own.model&&resolveModel(own.model,user))return own.model;return defaultModelRef(user)};
+    if(pathname==='/api/pet/ai'&&(req.method==='GET'||req.method==='PUT')){
+      const user=session.user;
+      if(req.method==='PUT'){
+        const body=await readBody(req,4*1024),mode=body.mode==='own'?'own':'main',model=String(body.model||'').slice(0,200);
+        if(mode==='own'&&!resolveModel(model,user))return json(res,400,{error:'所选模型不可用或你无权使用'});
+        user.petAi={mode,model:mode==='own'?model:''};await persist();
+      }
+      const month=monthStat(user.id).pet||{calls:0,inputTokens:0,outputTokens:0,totalTokens:0,cost:0};
+      return json(res,200,{mode:user.petAi?.mode==='own'?'own':'main',model:user.petAi?.model||'',effective:petModelRef(user),mainModel:defaultModelRef(user),models:modelCatalog(user).map(item=>({ref:item.ref,label:item.label||item.model,providerName:item.providerName})),month:{...month,currency:pricingCurrency()}});
+    }
+    // 和桌宠聊天：独立的宠物 AI。link=true 时把主对话最近几条交给她（对话联动），她可以点评，但不是主助手；每人每分钟最多 8 次
+    if(pathname==='/api/pet/chat'&&req.method==='POST'){
+      const body=await readBody(req,16*1024),message=String(body.message||'').replace(/[\u0000-\u0008\u000b-\u001f]/g,' ').trim().slice(0,500);
+      if(!message)return json(res,400,{error:'说点什么吧'});
+      const wait=hitWindowLimit(petChatHits,session.user.id,8,60*1000);
+      if(wait)return json(res,429,{error:'聊太快啦，请 '+wait+' 秒后再试'});
+      {const over=quotaError(session.user);if(over)return json(res,429,{error:over})}
+      ensureModelReady(session.user);
+      const clean=list=>(Array.isArray(list)?list:[]).slice(-8).map(item=>({role:item?.role==='user'?'user':'assistant',text:String(item?.text||'').replace(/[\u0000-\u0008\u000b-\u001f]/g,' ').slice(0,300)})).filter(item=>item.text.trim());
+      const history=clean(body.history),linked=body.link===true?clean(body.context):[];
+      const system='你是桌宠“梦色”，一个有点俏皮的二次元少女，肩上趴着一只小狐狸。你和用户聊天，回答简短（一般不超过 60 个汉字），口语化，可以带一个颜文字或 emoji。你不是用户正在使用的主助手，不要冒充它做长篇回答；遇到需要认真解决的问题，建议用户去问主助手。'+(linked.length?'\n\n下面是用户此刻和主助手的对话节选，你可以自然地点评或回应它，但不要复述全文：\n'+linked.map(item=>(item.role==='user'?'用户：':'主助手：')+item.text).join('\n'):'');
+      const ref=petModelRef(session.user);
+      const result=await askModel([...history.map(item=>({role:item.role,content:item.text})),{role:'user',content:message}],ref,system);
+      recordUsage(session.user.id,result.usage,ref,'pet');await persist();
+      return json(res,200,{reply:String(result.reply||'').trim().slice(0,600),model:ref,linked:linked.length>0});
+    }
     // 桌宠 AI 台词（可选，前端默认关闭）：按情绪让当前模型现编一句很短的话；每人每分钟最多 3 次，计入用量
     if(pathname==='/api/pet/line'&&req.method==='POST'){
       const body=await readBody(req,4*1024),emotion=String(body.emotion||'').slice(0,20);
@@ -2719,7 +2932,7 @@ const server=http.createServer(async(req,res)=>{
       if(wait)return json(res,429,{error:'桌宠说话太频繁，请 '+wait+' 秒后再试'});
       ensureModelReady(session.user);
       const hint=String(body.hint||'').replace(/[\u0000-\u001f]/g,' ').slice(0,80);
-      const ref=defaultModelRef(session.user);
+      const ref=petModelRef(session.user);
       const result=await askModel([{role:'user',content:'现在的情绪：'+EMOTIONS[emotion]+(hint?'。刚发生的事：'+hint:'')+'。请说一句话。'}],ref,'你是桌宠“梦色”，一个有点俏皮的二次元少女，肩上趴着一只小狐狸。只输出她此刻会说的一句话：不超过 24 个汉字，口语化，可以带一个颜文字或 emoji，不要引号、不要解释、不要换行。');
       recordUsage(session.user.id,result.usage,ref,'pet');await persist();
       const line=String(result.reply||'').replace(/\s+/g,' ').trim().slice(0,60);
@@ -2733,7 +2946,7 @@ const server=http.createServer(async(req,res)=>{
       const wait=hitWindowLimit(petStickerHits,user.id,6,60*1000);
       if(wait)return json(res,429,{error:'看图太频繁，请 '+wait+' 秒后再试'});
       const config=visionConfig();
-      const ref=[defaultModelRef(user),...modelCatalog(user).map(item=>item.ref)].find(candidate=>{const target=candidate&&resolveModel(candidate,user);return target&&isVisionModel(target.model,config.visionModels)});
+      const ref=[petModelRef(user),defaultModelRef(user),...modelCatalog(user).map(item=>item.ref)].find(candidate=>{const target=candidate&&resolveModel(candidate,user);return target&&isVisionModel(target.model,config.visionModels)});
       const serviceReady=config.enabled&&config.baseUrl&&config.dialect==='openai';
       if(!ref&&!serviceReady)return json(res,200,{kind:'unsupported',reason:'没有能看图的模型'});
       const record=records[0],buffer=await readFile(path.join(attachDir(record.userId),record.file));
@@ -2760,7 +2973,7 @@ const server=http.createServer(async(req,res)=>{
       const wait=hitWindowLimit(petSenseHits,session.user.id,4,60*1000);
       if(wait)return json(res,429,{error:'情绪理解太频繁，请 '+wait+' 秒后再试'});
       ensureModelReady(session.user);
-      const ref=defaultModelRef(session.user);
+      const ref=petModelRef(session.user);
       const result=await askModel([{role:'user',content:lines.join('\n')}],ref,'你是情绪分析器。下面是一段聊天，请判断“最后一条用户消息”给桌宠助手带来的情绪影响。要结合上下文（用户是在批评助手的回答、表达自己的低落、开玩笑、夸奖，还是只是中性提问，反话也要识别），也要理解 emoji、表情包文字（如[捂脸]）和颜文字。只输出一个 JSON，不要其他文字：{"valence":-1到 1 的数,"arousal":0 到 1 的数,"about":"pet"|"self"|"none","emotion":"angry"|"sad"|"laugh"|"shy"|"surprised"|"happy"|"none"}。about：pet=针对助手本身（夸或批评），self=用户在说自己的状态，none=中性或第三方。');
       recordUsage(session.user.id,result.usage,ref,'pet');await persist();
       let parsed={};try{parsed=JSON.parse((String(result.reply||'').match(/\{[\s\S]*\}/)||['{}'])[0])}catch{}
@@ -3689,7 +3902,7 @@ const server=http.createServer(async(req,res)=>{
       }catch(error){return json(res,error.status||502,{error:error.message||'翻译失败'})}
     }
     // ---- 多智能体群聊接口 ----
-    const groupMatch=pathname.match(/^\/api\/groups\/([0-9a-f-]+)(\/send)?$/i);
+    const groupMatch=pathname.match(/^\/api\/groups\/([0-9a-f-]+)(\/send|\/usage)?$/i);
     if(pathname==='/api/groups'&&req.method==='GET')return json(res,200,{groups:Object.values(db.groups).filter(g=>g.userId===session.user.id).sort((a,b)=>b.updatedAt-a.updatedAt).map(safeGroup)});
     if(pathname==='/api/groups'&&req.method==='POST'){
       if(Object.values(db.groups).filter(g=>g.userId===session.user.id).length>=50)return json(res,400,{error:'群聊数量已达上限（50）'});
@@ -3701,6 +3914,10 @@ const server=http.createServer(async(req,res)=>{
     if(groupMatch){
       const group=db.groups[groupMatch[1]];
       if(!group||group.userId!==session.user.id)return json(res,404,{error:'群聊不存在'});
+      if(groupMatch[2]==='/usage'){
+        if(req.method!=='GET')return json(res,405,{error:'方法不支持'});
+        return json(res,200,groupUsageReport(group.id,url.searchParams.get('month')||monthKey()));
+      }
       if(!groupMatch[2]){
         if(req.method==='GET')return json(res,200,{group:safeGroup(group),messages:group.messages});
         if(req.method==='DELETE'){if(busyGroups.has(group.id))return json(res,409,{error:'群聊正在回复，请先停止'});delete db.groups[group.id];await persist();return json(res,200,{ok:true})}
@@ -3741,7 +3958,7 @@ const server=http.createServer(async(req,res)=>{
         const callModel=async(participant,prompt,onDelta,signal,extraSystem)=>{
           const limit=quotaError(session.user);if(limit)throw fail(429,limit);
           const result=await streamModel([{role:'user',content:prompt}],onDelta,signal,participant.model,[participant.system,extraSystem].filter(Boolean).join('\n\n'));
-          recordUsage(session.user.id,result.usage,participant.model,'group');await persist();
+          recordUsage(session.user.id,result.usage,participant.model,'group',{groupId:group.id,label:participant.label});await persist();
           return {text:result.reply,usage:result.usage,aborted:result.aborted};
         };
         try{

@@ -116,6 +116,9 @@ fun AppRoot(vm: AppViewModel) {
                 Screen.Market -> MarketScreen(vm)
                 Screen.Admin -> AdminScreen(vm)
                 Screen.Security -> SecurityScreen(vm)
+                Screen.Groups -> GroupsScreen(vm)
+                Screen.GroupChat -> GroupChatScreen(vm)
+                Screen.GroupEdit -> GroupEditScreen(vm)
             }
             if (vm.toast.isNotEmpty()) {
                 LaunchedEffect(vm.toast) { kotlinx.coroutines.delay(3200); vm.toast = "" }

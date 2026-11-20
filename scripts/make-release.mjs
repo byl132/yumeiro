@@ -8,7 +8,9 @@ import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import os from 'node:os';
 import { createZip } from '../ziputil.mjs';
+import { signRelease } from '../updatepkg.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2), opt = name => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : ''; };
@@ -30,9 +32,14 @@ async function collect(dir, prefix = '') {
   return out;
 }
 const entries = await collect(root);
+// 官方签名：用私钥给文件清单签名，签名放进包里；服务器内置公钥，网页上传更新时自己核实。私钥不在仓库里（默认 ~/.yumeiro/release-signing.pem，也可用 --sign-key 或 YUMEIRO_SIGNING_KEY_FILE 指定）。
+const keyFile = opt('--sign-key') || process.env.YUMEIRO_SIGNING_KEY_FILE || path.join(os.homedir(), '.yumeiro', 'release-signing.pem');
+let signingKey = ''; try { signingKey = await readFile(keyFile, 'utf8'); } catch { /* 没有私钥：打出未签名的包 */ }
+if (!signingKey) console.log('⚠ 没有找到签名私钥（' + keyFile + '），这次打出的包没有官方签名，不能在网页里更新（命令行更新不受影响）。');
+const signed = list => signingKey ? [...list, ...signRelease(list, version, signingKey)] : list;
 if (entries.some(e => /(^|\/)(\.env|secrets|node_modules)(\/|$)/.test(e.name.replace('.env.example', '')))) throw new Error('发布包里混进了不该有的文件');
 const lean = path.join(outDir, `Yumeiro-${version}.zip`);
-await writeFile(lean, createZip(entries));
+await writeFile(lean, createZip(signed(entries)));
 const size = async file => ((await stat(file)).size / 1048576).toFixed(1) + ' MB';
 console.log(`已生成 ${lean}（${entries.length} 个文件，${await size(lean)}）`);
 
@@ -42,7 +49,7 @@ if (clientsDir) {
   const extra = [];
   for (const n of packages) extra.push({ name: 'Yumeiro/Yumeiro-Clients/' + n, data: await readFile(path.join(clientsDir, n)), mode: 0o100644 });
   const full = path.join(outDir, `Yumeiro-${version}-with-clients.zip`);
-  await writeFile(full, createZip([...entries, ...extra]));
+  await writeFile(full, createZip(signed([...entries, ...extra])));
   console.log(`已生成 ${full}（含 ${packages.length} 个客户端文件，${await size(full)}）`);
 }
 

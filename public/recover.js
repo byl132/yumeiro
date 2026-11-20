@@ -99,5 +99,6 @@
     const wrap = el('div', { style: 'margin-top:10px;text-align:center;font-size:13px' }, link);
     if (anchor && anchor.parentElement) anchor.parentElement.after(wrap); else card.append(wrap);
   }
-  mount(); new MutationObserver(mount).observe(document.documentElement, { childList: true, subtree: true });
+  // 登录卡片是首页静态结构，脚本加载时已经存在；不监听整个 document，避免与其他模块的 DOM 观察器互相触发导致页面卡死。
+  mount();
 })();

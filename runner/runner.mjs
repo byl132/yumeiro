@@ -118,7 +118,7 @@ export function createRunner({ token, sandboxToken, root, env = process.env, log
   const versions = {};
   const probe = engine => new Promise(resolve => {
     const [cmd, ...pre] = engineCommand(engine, env);
-    execFile(cmd, [...pre, '--version'], { timeout: 8000, env: { PATH: env.PATH, HOME: env.HOME } }, (error, stdout) => resolve(error ? null : String(stdout).trim().split('\n')[0].slice(0, 80)));
+    execFile(cmd, [...pre, '--version'], { timeout: 8000, env: { PATH: env.PATH, HOME: env.HOME } }, (error, stdout, stderr) => resolve(error ? null : (String(stdout || stderr).trim().split('\n')[0].slice(0, 80) || '已安装')));
   });
   const json = (res, status, value) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(value)); };
   // MCP 服务的启动器（npx / uvx）有没有：管理页的 MCP 市场用它提前标出“这个服务在运行器里装不了”

@@ -1,4 +1,4 @@
-// 环境检测与封号风险评估：只做“检测、提示、在风险发生前拒绝”，不做任何规避平台风控的事。
+// 环境检测：只做“检测、提示”；所在地区不被官方支持时，如实告知“此处暂不可用”，并拒绝发出请求。
 // 纯函数 + 可注入 fetch，便于测试。
 export const TARGETS = [
   { id: 'anthropic-api', vendor: 'claude', label: 'Claude API', url: 'https://api.anthropic.com/' },
@@ -168,32 +168,32 @@ export function evaluate({ egress, probes, guard, usage = {}, regionHistory = []
     const mine = probes.filter(p => p.vendor === vendor);
     const country = egress?.country || '';
     if (!cfg.regions) { /* 不受地区限制（如 DeepSeek） */ } else if (!country) add('warn', '无法确定出口所在地区', '检查服务器是否能访问 www.cloudflare.com；无法确认地区时请自行核对出口 IP。');
-    else if (guard.restricted.includes(country)) add('danger', `出口 IP 位于 ${country}，该地区在“受限地区”清单中`, `${VENDOR_NAMES[vendor]} 官方不向该地区提供服务，继续使用可能导致账号被限制或封禁。请改用位于受支持地区的服务器/合规网络出口，或改用该地区合法可用的其他模型服务商。`, true);
+    else if (guard.restricted.includes(country)) add('danger', `服务器所在地区（${country}）暂不支持使用 ${VENDOR_NAMES[vendor]}`, `${VENDOR_NAMES[vendor]} 官方没有在该地区提供服务，因此这里暂时无法使用。受限地区清单仅供参考，以官方公布的“支持的国家和地区”为准。`, true);
     if (mine.length && mine.every(p => !p.reachable)) add('warn', `${VENDOR_NAMES[vendor]} 的所有端点都连不上（${mine[0].error || '超时'}）`, '先检查服务器网络、DNS 和防火墙；如果配置了出口代理，确认代理可用。');
     else for (const p of mine) {
-      if (p.reachable && p.challenged) add('warn', `${p.label} 返回了风控挑战/限流（HTTP ${p.status}）`, '出口 IP 信誉可能偏低（如共享的数据中心 IP）。降低调用频率，换用稳定、独享的合规出口。');
+      if (p.reachable && p.challenged) add('warn', `${p.label} 返回了验证/限流响应（HTTP ${p.status}）`, '对方暂时限制了访问，请降低调用频率，稍后再试。');
       else if (p.reachable && p.ms > 2500) add('warn', `${p.label} 延迟较高（${p.ms} ms）`, '延迟高会让长任务超时，可考虑更近的服务器节点。');
     }
-    if (cfg.account && egress?.hosting === true) add('warn', `出口是数据中心/托管 IP（${egress.isp || '未知运营商'}）`, '使用 API Key 通常没问题；若用 Claude Code / Codex 的“订阅账号登录”，数据中心 IP 更容易触发风控，建议登录与使用保持在同一稳定出口。');
-    if (cfg.regions && egress?.proxy === true) add('warn', '出口被识别为代理/VPN', '共享代理 IP 信誉不稳定，建议使用独享、固定的出口。');
+    if (cfg.account && egress?.hosting === true) add('warn', `出口是数据中心/托管 IP（${egress.isp || '未知运营商'}）`, '使用 API Key 通常没问题；订阅账号登录在这类网络下，官方可能要求额外验证。');
+    if (cfg.regions && egress?.proxy === true) add('warn', '出口被识别为代理/VPN', '部分服务商对这类网络会要求额外验证，仅供参考。');
     if (ci && (cfg.regions || cfg.account)) {
       if (ci.score !== null) {
         const label = `CleanIP 纯净度 ${ci.score}${ci.grade ? '（' + ci.grade + '）' : ''}${ci.type ? ' · ' + ci.type : ''}`;
-        if (ci.score < 40) add('danger', label + '，很低', '这个出口 IP 信誉很差（常见于被滥用的共享机房 / 代理 IP）。建议换成独享、固定的出口；这条只提示，不会单独拦截请求。');
-        else if (ci.score < 60) add('warn', label + '，偏低', '出口 IP 信誉偏低，官方风控更容易给出验证或限流。建议换更干净的出口。');
-        else if (ci.score < 80 && cfg.account) add('warn', label + '，一般', '用订阅账号登录 Claude Code / Codex 时，建议用更干净的独享出口。');
+        if (ci.score < 40) add('danger', label + '，很低', '这个出口 IP 的信誉较低，官方服务可能要求额外验证或限流。这条只提示，不会单独拦截请求。');
+        else if (ci.score < 60) add('warn', label + '，偏低', '出口 IP 信誉偏低，官方服务可能要求额外验证或限流。');
+        else if (ci.score < 80 && cfg.account) add('warn', label + '，一般', '订阅账号登录时官方偶尔会要求额外验证，仅供参考。');
         else reasons.push({ level: 'ok', text: label });
       }
-      if ((ci.tor || ci.vpn || ci.proxy) && egress?.proxy !== true) add('warn', 'CleanIP 把出口标记为 ' + [ci.tor && 'Tor', ci.vpn && 'VPN', ci.proxy && '代理'].filter(Boolean).join(' / '), '共享的匿名出口信誉不稳定，建议使用独享、固定的出口。');
-      if (cfg.account && ci.hosting && egress?.hosting !== true) add('warn', 'CleanIP 把出口识别为数据中心/托管 IP' + (ci.asName ? '（' + ci.asName + '）' : ''), '使用 API Key 通常没问题；若用订阅账号登录，建议改用住宅或独享的出口。');
-      if (cfg.regions && ci.country && country && ci.country !== country) add('warn', `多个来源对出口地区的判断不一致（Cloudflare：${country}；CleanIP：${ci.country}）`, '出口可能经过中转或 IP 库有延迟，请以官方“支持的国家和地区”为准人工核对。');
+      if ((ci.tor || ci.vpn || ci.proxy) && egress?.proxy !== true) add('warn', 'CleanIP 把出口标记为 ' + [ci.tor && 'Tor', ci.vpn && 'VPN', ci.proxy && '代理'].filter(Boolean).join(' / '), '部分服务商对这类网络会要求额外验证，仅供参考。');
+      if (cfg.account && ci.hosting && egress?.hosting !== true) add('warn', 'CleanIP 把出口识别为数据中心/托管 IP' + (ci.asName ? '（' + ci.asName + '）' : ''), '使用 API Key 通常没问题；订阅账号登录在这类网络下，官方可能要求额外验证。');
+      if (cfg.regions && ci.country && country && ci.country !== country) add('warn', `多个来源对出口地区的判断不一致（Cloudflare：${country}；CleanIP：${ci.country}）`, 'IP 库可能有延迟，请以官方“支持的国家和地区”为准人工核对。');
     }
     const distinct = new Set(regionHistory.filter(Boolean));
-    if (cfg.regions && distinct.size >= 3) add('warn', `过去 24 小时出口地区变化了 ${distinct.size} 个（${[...distinct].join('、')}）`, '频繁更换出口地区是常见的风控信号。请固定出口，不要来回切换。');
+    if (cfg.regions && distinct.size >= 3) add('warn', `过去 24 小时出口地区变化了 ${distinct.size} 个（${[...distinct].join('、')}）`, '出口地区近期有变化，仅供参考。');
     const u = usage[vendor] || {};
-    if (cfg.rate && u.users24h >= 2) add('warn', `过去 24 小时有 ${u.users24h} 个账号通过本站使用 ${VENDOR_NAMES[vendor]} 引擎`, '多人共用同一个个人订阅账号通常违反服务条款，被封风险高。建议每人使用自己的账号，团队使用请改用官方 API Key。');
+    if (cfg.rate && u.users24h >= 2) add('warn', `过去 24 小时有 ${u.users24h} 个账号通过本站使用 ${VENDOR_NAMES[vendor]} 引擎`, '多人共用同一个个人订阅账号通常不符合服务条款。建议每人使用自己的账号，团队使用请改用官方 API Key。');
     const limit = guard.hourlyLimit;
-    if (!cfg.rate) { /* 只有订阅账号型引擎才按小时限频 */ } else if (u.lastHour >= limit) add('danger', `最近 1 小时已调用 ${u.lastHour} 次，达到上限 ${limit}`, '短时间大量调用容易触发限流或风控。已暂时拒绝新请求，等调用量回落后自动恢复；也可在“环境检测”里调高上限。', true);
+    if (!cfg.rate) { /* 只有订阅账号型引擎才按小时限频 */ } else if (u.lastHour >= limit) add('danger', `最近 1 小时已调用 ${u.lastHour} 次，达到上限 ${limit}`, '短时间大量调用容易触发官方限流。已暂时拒绝新请求，调用量回落后自动恢复；也可在“环境检测”里调高上限。', true);
     else if (u.lastHour >= limit * 0.7) add('warn', `最近 1 小时已调用 ${u.lastHour} 次，接近上限 ${limit}`, '放慢节奏，或把批量任务错开。');
     if (cfg.rate && u.concurrent >= guard.maxConcurrent) add('warn', `当前并发 ${u.concurrent}，已达并发上限 ${guard.maxConcurrent}`, '并发过高容易触发限流，超出的请求会排队/被拒绝。');
     if (level === 'ok') reasons.push({ level: 'ok', text: '未发现风险信号' });

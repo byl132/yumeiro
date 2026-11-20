@@ -27,6 +27,7 @@ test.before(async () => {
     req.on('end', () => {
       const body = JSON.parse(raw), last = body.messages.at(-1).content, system = body.messages.find(m => m.role === 'system')?.content || '';
       prompts.push({ last, system });
+      if (!body.stream) { res.writeHead(200, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ choices: [{ message: { content: '喵～来自宠物' } }], usage: { prompt_tokens: 4, completion_tokens: 6 } })); }
       const who = /你的名字是“([^”]+)”/.exec(system)?.[1] || /你的名称：(\S+)/.exec(last)?.[1] || '?';
       if (last.includes('你是团队的产品经理')) {
         const worked = last.includes('【乙】\n');
@@ -209,4 +210,89 @@ test('产品经理带队：一位成员出错不拖垮整轮，其余成员的�
   await runPmTeam({ message: 'x', pm, members, call, emit: e => events.push(e) });
   assert.match(events.filter(e => e.type === 'turn_end').at(-1).text, /汇总：甲失败，乙在/);
   assert.ok(events.some(e => e.type === 'turn_end' && e.failed && e.label === '甲'));
+});
+
+test('群聊用量：按成员、按模型统计 Token 与费用；主账号可导出报表', async () => {
+  const pricing = (await call('/api/admin/pricing')).data;
+  assert.ok(pricing.models.length, '至少有一个可定价的模型');
+  const ref = pricing.models[0].ref;
+  assert.equal((await call('/api/admin/pricing', 'PUT', { currency: '$', models: { [ref]: { input: -1, output: 1 } } })).status, 400, '负数价格被拒绝');
+  assert.equal((await call('/api/admin/pricing', 'PUT', { currency: '$', models: { [ref]: { input: 100000, output: 200000 } } })).status, 200);
+  const group = (await call('/api/groups', 'POST', { title: '算账群', mode: 'chat', members: [{ label: '甲' }, { label: '乙' }] })).data.group;
+  await sse(`/api/groups/${group.id}/send`, { message: '@甲 你好' });
+  const usage = (await call(`/api/groups/${group.id}/usage`)).data;
+  const total = usage.thisMonth.total;
+  assert.equal(total.calls, 1); assert.equal(total.inputTokens, 2); assert.equal(total.outputTokens, 3); assert.equal(total.totalTokens, 5);
+  assert.equal(total.cost, 0.8, '(2×10万 + 3×20万) / 100万');
+  assert.deepEqual(usage.thisMonth.members.map(m => m.label), ['甲']);
+  assert.equal(usage.currency, '$');
+
+  const report = (await call('/api/admin/usage')).data;
+  assert.ok(report.totals.cost >= 0.8 && report.groups.some(g => g.title === '算账群' && g.members[0].label === '甲'));
+  assert.ok(report.models.some(m => m.model === ref && m.cost >= 0.8));
+  const csvOf = async by => { const r = await fetch(base + '/api/admin/usage/export?by=' + by, { headers: { Cookie: auth.cookie } }); const buf = Buffer.from(await r.arrayBuffer()); return { status: r.status, type: r.headers.get('content-type'), text: buf.toString('utf8'), bom: buf.subarray(0, 3).toString('hex') === 'efbbbf' }; };
+  const byGroup = await csvOf('group');
+  assert.equal(byGroup.status, 200); assert.match(byGroup.type, /text\/csv/); assert.ok(byGroup.text.startsWith('\uFEFF群聊,'));
+  assert.match(byGroup.text, /算账群,owner@example\.com,甲,/);
+  assert.match((await csvOf('member')).text, /owner@example\.com/);
+  assert.match((await csvOf('model')).text, /^\uFEFF模型,服务商,/);
+  assert.equal((await csvOf('bogus')).status, 400);
+
+  // 群被删除后，报表里仍保留它的用量
+  await call('/api/groups/' + group.id, 'DELETE');
+  assert.ok((await call('/api/admin/usage')).data.groups.some(g => g.title === '算账群' && g.deleted));
+});
+
+test('成员使用时段：时段外被拒绝，时段内放行；格式不对被拒绝', async () => {
+  const email = 'window@example.com', password = 'member-password-123456';
+  const created = await call('/api/admin/members', 'POST', { email, password });
+  assert.equal(created.status, 201); const id = created.data.member.id;
+  const hhmm = ms => { const d = new Date(Date.now() + ms); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+  assert.equal((await call('/api/admin/members/' + id, 'PATCH', { allowedHours: { start: '9:00', end: '18:00' } })).status, 400);
+  assert.equal((await call('/api/admin/members/' + id, 'PATCH', { allowedHours: { start: '10:00', end: '10:00' } })).status, 400);
+  const login = await fetch(base + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base }, body: JSON.stringify({ email, password }) });
+  const member = { Cookie: login.headers.get('set-cookie').split(';')[0] };
+  const blocked = async () => (await (await fetch(base + '/api/usage/me', { headers: member })).json()).blocked;
+  assert.equal(await blocked(), null, '没设时段时不限制');
+  const out = await call('/api/admin/members/' + id, 'PATCH', { allowedHours: { start: hhmm(2 * 3600e3), end: hhmm(3 * 3600e3) } });
+  assert.equal(out.status, 200); assert.ok(out.data.member.allowedHours);
+  assert.match(await blocked(), /使用时段/);
+  await call('/api/admin/members/' + id, 'PATCH', { allowedHours: { start: hhmm(-3600e3), end: hhmm(3600e3) } });
+  assert.equal(await blocked(), null, '当前时间在时段内');
+  await call('/api/admin/members/' + id, 'PATCH', { allowedHours: null });
+  assert.equal((await call('/api/admin/members')).data.members.find(m => m.id === id).allowedHours, null);
+});
+
+test('成员每小时 Token 上限：可设置，超出后新请求被拒绝', async () => {
+  const email = 'hourly@example.com', password = 'member-password-123456';
+  const id = (await call('/api/admin/members', 'POST', { email, password, hourlyTokenLimit: 8 })).data.member.id;
+  assert.equal((await call('/api/admin/members/' + id, 'PATCH', { hourlyTokenLimit: -1 })).status, 400);
+  const login = await fetch(base + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base }, body: JSON.stringify({ email, password }) });
+  const lj = await login.json(), cookie = login.headers.get('set-cookie').split(';')[0];
+  const mcall = async (p, method = 'GET', body) => { const r = await fetch(base + p, { method, headers: { Origin: base, Cookie: cookie, 'X-CSRF-Token': lj.csrfToken, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined }); return { status: r.status, text: await r.text() }; };
+  assert.equal(JSON.parse((await mcall('/api/usage/me')).text).blocked, null);
+  const group = JSON.parse((await mcall('/api/groups', 'POST', { mode: 'chat', members: [{ label: '甲' }] })).text).group;
+  for (let i = 0; i < 2; i++) await mcall(`/api/groups/${group.id}/send`, 'POST', { message: '@甲 你好' }); // 每次 5 个 Token，第二次后累计 10 ≥ 8
+  const me = JSON.parse((await mcall('/api/usage/me')).text);
+  assert.match(me.blocked, /本小时 Token/); assert.equal(me.usage.hourlyTokenLimit, 8); assert.ok(me.usage.hourTokens >= 8);
+  assert.equal((await mcall(`/api/groups/${group.id}/send`, 'POST', { message: '再来' })).status, 429);
+  assert.equal((await call('/api/admin/members/' + id, 'PATCH', { hourlyTokenLimit: 0 })).status, 200);
+  assert.equal(JSON.parse((await mcall('/api/usage/me')).text).blocked, null);
+});
+
+test('宠物 AI：默认跟随主 AI，可单独选模型；聊天单独计量；联动时带上主对话节选', async () => {
+  const info = (await call('/api/pet/ai')).data;
+  assert.equal(info.mode, 'main'); assert.equal(info.effective, info.mainModel);
+  assert.equal((await call('/api/pet/ai', 'PUT', { mode: 'own', model: 'no/such-model' })).status, 400);
+  assert.equal((await call('/api/pet/ai', 'PUT', { mode: 'own', model: info.models[0].ref })).data.mode, 'own');
+  assert.equal((await call('/api/pet/chat', 'POST', {})).status, 400);
+  const before = (await call('/api/pet/ai')).data.month.calls;
+  const plain = await call('/api/pet/chat', 'POST', { message: '你好呀', link: false, context: [{ role: 'user', text: '主对话里的秘密内容' }] });
+  assert.equal(plain.status, 200); assert.ok(plain.data.reply); assert.equal(plain.data.linked, false);
+  assert.doesNotMatch(prompts.at(-1).system, /主对话里的秘密内容/, '不联动时看不到主对话');
+  const linked = await call('/api/pet/chat', 'POST', { message: '刚才聊得怎么样', link: true, history: [{ role: 'user', text: '嗨' }, { role: 'assistant', text: '嗨嗨' }], context: [{ role: 'user', text: '帮我写个排序' }, { role: 'assistant', text: '好的，这是快速排序' }] });
+  assert.equal(linked.data.linked, true); assert.match(prompts.at(-1).system, /帮我写个排序/); assert.match(prompts.at(-1).system, /不是用户正在使用的主助手/);
+  const after = (await call('/api/pet/ai')).data.month;
+  assert.equal(after.calls, before + 2); assert.ok(after.totalTokens >= 10, '宠物 AI 的 Token 单独统计');
+  assert.equal((await call('/api/pet/ai', 'PUT', { mode: 'main' })).data.mode, 'main');
 });

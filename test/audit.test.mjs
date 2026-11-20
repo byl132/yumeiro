@@ -49,7 +49,7 @@ test('环境检测：受限地区拒绝、频率上限拒绝、其余只提示',
 
   const cn = evaluate({ egress: { country: 'CN', ip: '2.2.2.2' }, probes: probesOk, guard });
   assert.equal(cn.vendors.claude.level, 'danger'); assert.equal(cn.vendors.codex.block, true);
-  assert.match(cn.vendors.claude.advice.join(''), /受支持地区/);
+  assert.match(cn.vendors.claude.advice.join(''), /暂时无法使用/); assert.doesNotMatch(JSON.stringify(cn), /合规出口|绕过|换出口/);
   assert.equal(evaluate({ egress: { country: 'CN' }, probes: probesOk, guard: normalizeGuard({ enabled: false }) }).vendors.claude.block, false, '关闭守卫后只提示不拦截');
 
   const rate = evaluate({ egress: { country: 'US' }, probes: probesOk, guard, usage: { claude: { lastHour: 40, concurrent: 0, users24h: 1 } } });
@@ -169,7 +169,7 @@ test('环境检测接口：仅主账号；守卫设置可保存，代理地址�
   assert.deepEqual([...new Set(doctor.data.checks.map(c => c.group))], ['系统', '存储与安全', '模型与服务', '网络', '客户端与内容']);
   assert.equal(doctor.data.checks.find(c => c.title === '数据目录可写').level, 'ok');
   assert.equal(doctor.data.checks.find(c => c.title === 'Node.js 版本').level, 'ok');
-  assert.ok(doctor.data.checks.some(c => /Gemini 可达性/.test(c.title)) && doctor.data.checks.some(c => /DeepSeek 可达性/.test(c.title)));
+  assert.ok(!doctor.data.checks.some(c => /可达性|出口 IP/.test(c.title)), '体检不再混入环境检测的内容');
   assert.match(doctor.data.report, /服务器体检/); assert.ok(['ok', 'warn', 'fail'].includes(doctor.data.summary.level));
   assert.ok(JSON.stringify(doctor.data).indexOf('member-password') < 0 && JSON.stringify(doctor.data).indexOf('apiKey') < 0, '体检结果不含密钥');
   assert.equal((await call(owner, '/api/admin/env/guard', 'PUT', { proxyUrl: 'ftp://x' })).status, 400);

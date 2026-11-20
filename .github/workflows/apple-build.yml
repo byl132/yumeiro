@@ -4,12 +4,6 @@ name: Apple build check
 # 只负责“能不能编译”，不签名、不打 ipa。可以在 Actions 页面手动点 Run workflow。
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - "clients/apple/**"
-      - "Sources/**"
-      - "project.yml"
-      - ".github/workflows/apple-build.yml"
 
 jobs:
   build:

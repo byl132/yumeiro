@@ -25,12 +25,10 @@ struct SidebarView: View {
     @Binding var showSettings: Bool
     @Binding var compact: NavigationSplitViewColumn
     @State private var deleting: Conv?
-    @State private var showGroups = false
 
     var body: some View {
         List {
             Button { model.newChat(); compact = .detail } label: { Label("新建对话", systemImage: "square.and.pencil") }
-            Button { showGroups = true } label: { Label("群聊（多智能体）", systemImage: "person.3") }
             ForEach(model.grouped(), id: \.0) { group in
                 Section(group.0) {
                     ForEach(group.1) { conv in
@@ -59,7 +57,6 @@ struct SidebarView: View {
                 }.padding(10).background(.regularMaterial)
             }.buttonStyle(.plain)
         }
-        .sheet(isPresented: $showGroups) { GroupsSheet() }
         .confirmationDialog("删除对话", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), presenting: deleting) { conv in
             Button("删除「\(conv.title)」", role: .destructive) { Task { await model.deleteConv(conv.id) } }
         } message: { _ in Text("删不回来。") }

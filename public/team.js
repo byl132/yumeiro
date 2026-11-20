@@ -388,6 +388,7 @@
   const modelName = m => (m.provider === 'default' ? '' : m.providerName + ' · ') + (m.label || m.model);
   const num = n => Number(n || 0).toLocaleString();
   const lim = n => n ? num(n) : '不限';
+  const money = v => (Math.round((v || 0) * 10000) / 10000).toLocaleString();
   const pct = (used, limit) => limit ? Math.min(100, Math.round(used / limit * 100)) : 0;
   const meter = (label, used, limit) => el('div', { class: 'team-row' },
     el('div', { class: 'grow' }, label, el('small', { textContent: `已用 ${num(used)} / ${lim(limit)}${limit ? '（' + pct(used, limit) + '%）' : ''}` }),
@@ -401,20 +402,49 @@
     body.append(
       el('p', { class: 'team-note', textContent: `${mine.month} 月（服务器本地时间）。Token 为模型服务商返回的用量；未返回用量的调用只计次数（本月 ${u.unreportedCalls} 次）。额度达到后新请求会被拒绝，Token 额度可能被最后一次调用略微超出。` }),
       mine.blocked && el('div', { class: 'team-err', textContent: '当前已被限制：' + mine.blocked }),
-      meter('今日调用', u.todayCalls, u.dailyLimit), meter('本月调用', u.calls, u.monthlyCallLimit), meter('本月 Token', u.totalTokens, u.monthlyTokenLimit),
-      el('p', { class: 'team-note', textContent: '输入 ' + num(u.inputTokens) + ' · 输出 ' + num(u.outputTokens) + '　' + breakdown(u) }),
+      meter('今日调用', u.todayCalls, u.dailyLimit), meter('本月调用', u.calls, u.monthlyCallLimit), meter('本小时 Token', u.hourTokens, u.hourlyTokenLimit), meter('本月 Token', u.totalTokens, u.monthlyTokenLimit),
+      u.pet && u.pet.calls ? el('p', { class: 'team-note', textContent: '其中宠物 AI 单独计量：' + num(u.pet.calls) + ' 次 · ' + num(u.pet.totalTokens) + ' tokens' + (u.pet.cost ? ' · 估算费用 ' + money(u.pet.cost) : '') }) : null,
+      el('p', { class: 'team-note', textContent: '输入 ' + num(u.inputTokens) + ' · 输出 ' + num(u.outputTokens) + (u.cost ? ' · 估算费用 ' + money(u.cost) : '') + '　' + breakdown(u) }),
       mine.history.length > 1 && el('p', { class: 'team-note', textContent: '近月：' + mine.history.map(h => h.month + ' ' + num(h.calls) + ' 次/' + num(h.totalTokens) + ' tokens').join('；') }));
     if (pageMode || me.role !== 'admin') return;
     await renderTeamUsage(body);
   }
   async function renderTeamUsage(body) {
-    const report = await api('/api/admin/usage' + (usageMonth ? '?month=' + usageMonth : ''));
+    const report = await api('/api/admin/usage' + (usageMonth ? '?month=' + usageMonth : '')), cur = report.currency;
     const select = el('select', { on: { change: () => { usageMonth = select.value; render(); } } }, report.months.map(m => el('option', { value: m, textContent: m, selected: m === report.month })));
+    const exportLink = (by, text) => el('a', { class: 'secondary', href: `/api/admin/usage/export?by=${by}&month=${report.month}`, download: '', style: 'padding:6px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;text-decoration:none;color:inherit', textContent: text });
+    const cell = (v, wide) => el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--line);word-break:break-all' + (wide ? ';min-width:90px' : ''), textContent: String(v ?? '') });
+    const head = cols => el('thead', {}, el('tr', {}, cols.map(t => el('th', { style: 'text-align:left;padding:4px 6px;border-bottom:1px solid var(--line);white-space:nowrap', textContent: t }))));
+    const tbl = (cols, rows, empty) => el('div', { style: 'overflow:auto' }, el('table', { style: 'width:100%;border-collapse:collapse;font-size:13px' }, head(cols), el('tbody', {}, rows.length ? rows : [el('tr', {}, el('td', { colSpan: cols.length, style: 'padding:6px', textContent: empty }))])));
     body.append(pageMode ? null : el('h3', { textContent: '全部成员' }),
-      el('div', { class: 'team-form' }, select, el('div', { class: 'team-note', textContent: `合计 ${num(report.totals.calls)} 次 · ${num(report.totals.totalTokens)} tokens` })),
-      report.rows.map(r => el('div', { class: 'team-row' }, el('div', { class: 'grow' }, `${r.displayName}${r.disabled ? '（已停用）' : ''}`,
-        el('small', { textContent: `${r.email}　${num(r.calls)} 次（上限 ${lim(r.monthlyCallLimit)}）　${num(r.totalTokens)} tokens（上限 ${lim(r.monthlyTokenLimit)}）　今日 ${r.todayCalls}/${lim(r.dailyLimit)}` }),
-        el('small', { textContent: breakdown(r) })))));
+      el('div', { class: 'team-form' }, select, el('div', { class: 'team-note', textContent: `合计 ${num(report.totals.calls)} 次 · ${num(report.totals.totalTokens)} tokens · 估算费用 ${cur}${money(report.totals.cost)}（费用按“模型价格”里设置的单价，在调用当时计算）` })),
+      el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;margin:6px 0' }, exportLink('member', '导出：成员 × 模型（CSV）'), exportLink('group', '导出：群聊 × 成员 × 模型（CSV）'), exportLink('model', '导出：各模型 / 服务商（CSV）')),
+      report.rows.map(r => el('div', { class: 'team-row' }, el('div', { class: 'grow' }, `${r.displayName}${r.disabled ? '（已停用）' : ''}${r.allowedHours ? ' · 时段 ' + r.allowedHours.start + '–' + r.allowedHours.end : ''}`,
+        el('small', { textContent: `${r.email}　${num(r.calls)} 次（上限 ${lim(r.monthlyCallLimit)}）　${num(r.totalTokens)} tokens（上限 ${lim(r.monthlyTokenLimit)}）　本小时 ${num(r.hourTokens)}/${lim(r.hourlyTokenLimit)}　费用 ${cur}${money(r.cost)}　今日 ${r.todayCalls}/${lim(r.dailyLimit)}` }),
+        el('small', { textContent: breakdown(r) })))),
+      el('h4', { textContent: '各模型 / API 服务商用量' }),
+      tbl(['模型', '服务商', '调用', '输入', '输出', '总 Token', '费用'], report.models.map(x => el('tr', {}, [x.model, x.provider, num(x.calls), num(x.inputTokens), num(x.outputTokens), num(x.totalTokens), cur + money(x.cost)].map(v => cell(v)))), '本月还没有用量'),
+      el('h4', { textContent: '各群聊用量' }),
+      tbl(['群聊', '创建者', '调用', '总 Token', '费用', '成员明细'], report.groups.map(x => el('tr', {}, [x.title + (x.deleted ? '（已删除）' : ''), x.owner, num(x.calls), num(x.totalTokens), cur + money(x.cost), x.members.map(m => `${m.label} ${num(m.totalTokens)} / ${cur}${money(m.cost)}`).join('；')].map(v => cell(v, true)))), '本月还没有群聊用量'));
+    await renderPricing(body);
+  }
+  // 模型价格：每百万 Token 的输入 / 输出单价。只填你实际支付的价格；留空的模型只统计 Token，不算费用。
+  async function renderPricing(body) {
+    const data = await api('/api/admin/pricing'), err = errBox(), status = el('span', { class: 'team-note' });
+    const currency = el('input', { value: data.currency, maxLength: 6, style: 'width:70px' });
+    const rows = data.models.map(m => ({ m, input: el('input', { type: 'number', min: 0, step: 'any', value: m.price?.input || '', placeholder: '输入', style: 'width:90px' }), output: el('input', { type: 'number', min: 0, step: 'any', value: m.price?.output || '', placeholder: '输出', style: 'width:90px' }) }));
+    const save = async () => {
+      try {
+        const models = {}; for (const r of rows) if (r.input.value || r.output.value) models[r.m.ref] = { input: Number(r.input.value || 0), output: Number(r.output.value || 0) };
+        const out = await api('/api/admin/pricing', { method: 'PUT', body: JSON.stringify({ currency: currency.value, models }) });
+        err.textContent = ''; status.textContent = '已保存（' + out.count + ' 个模型有价格），新产生的用量会按新价格计费';
+      } catch (e) { err.textContent = e.message; }
+    };
+    body.append(el('h4', { textContent: '模型价格（每百万 Token）' }),
+      el('div', { class: 'team-note', textContent: '按你从 API 服务商那里实际的计费单价填写；改价只影响之后的调用，历史费用不变。没填价格的模型只统计 Token。' }),
+      el('label', { style: 'font-size:13px' }, '货币符号 ', currency),
+      el('div', { style: 'display:grid;gap:6px;margin:8px 0' }, rows.length ? rows.map(r => el('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap' }, el('span', { style: 'flex:1;min-width:160px;word-break:break-all', textContent: r.m.label + '　' + r.m.providerName + (r.m.label !== r.m.ref ? '　' + r.m.ref : '') }), r.input, r.output)) : [el('div', { class: 'team-note', textContent: '还没有可用的模型，先在“模型服务商”里接入。' })]),
+      el('div', { style: 'display:flex;gap:10px;align-items:center' }, el('button', { type: 'button', class: 'secondary', textContent: '保存价格', on: { click: save } }), status), err);
   }
   // 原生 append 会把数组转成 "[object HTMLDivElement]"；面板渲染大量使用 map() 生成的数组，这里让 append 自动展开数组并忽略空值。
   function flatBox() {
@@ -1889,6 +1919,10 @@
     const COLORS = { ok: '#2f9e6b', warn: '#d98e04', danger: '#c0392b' }, LABELS = { ok: '正常', warn: '注意', danger: '高风险' };
     const badge = level => el('span', { textContent: LABELS[level] || level, style: `display:inline-block;align-self:flex-start;width:fit-content;padding:1px 8px;border-radius:10px;color:#fff;font-size:12px;background:${COLORS[level] || '#888'}` });
     let data = null, timer = null, busy = false;
+    // 检测频率由使用者选择（保存在本浏览器里）；默认 5 分钟，也可以只手动检测
+    const EVERY = [[0, '仅手动'], [60, '1 分钟'], [300, '5 分钟'], [900, '15 分钟'], [1800, '30 分钟'], [3600, '1 小时']];
+    const everySec = () => { const v = Number(localStorage.getItem('envCheckEvery')); return EVERY.some(x => x[0] === v) && localStorage.getItem('envCheckEvery') !== null ? v : 300; };
+    const everyLabel = () => EVERY.find(x => x[0] === everySec())[1];
     // 系统综合研判：把 Cloudflare、ip-api、CleanIP、连通性探测、用量统计合成一个分数，并列出每一项依据
     const verdictCard = r => {
       const v = r.verdict, c = r.cleanip;
@@ -1916,7 +1950,7 @@
           ...v.reasons.map(x => el('div', { style: 'font-size:13px;color:' + COLORS[x.level], textContent: '• ' + x.text })),
           v.advice.length ? el('div', { class: 'team-note', style: 'margin-top:6px' }, el('strong', { textContent: '建议：' }), ...v.advice.map(a => el('div', { textContent: '– ' + a }))) : null,
           v.engine ? el('div', { class: 'team-note', textContent: `最近 1 小时引擎调用 ${data.usage[id].lastHour} 次 · 当前并发 ${data.usage[id].concurrent} · 24 小时内 ${data.usage[id].users24h} 个账号使用` }) : null)));
-      status.textContent = '最后检测 ' + new Date(r.at).toLocaleTimeString() + '（每 10 秒自动刷新）';
+      status.textContent = '最后检测 ' + new Date(r.at).toLocaleTimeString() + (everySec() ? '（每 ' + everyLabel() + ' 自动检测一次）' : '（已设为手动检测）');
     };
     const poll = async fresh => {
       if (busy || !body.isConnected) return; busy = true;
@@ -1932,19 +1966,21 @@
       try { await api('/api/admin/env/guard', { method: 'PUT', body: JSON.stringify({ enabled: enabled.checked, restricted: restricted.value, hourlyLimit: Number(hourly.value), maxConcurrent: Number(conc.value), cleanipEnabled: cleanipOn.checked, ...(clear === 'cleanip' ? { clearCleanipKey: true } : cleanip.value ? { cleanipKey: cleanip.value } : {}), ...(clear === true ? { clearProxy: true } : proxy.value ? { proxyUrl: proxy.value } : {}) }) }); proxy.value = ''; cleanip.value = ''; err.textContent = ''; status.textContent = '已保存'; poll(true); } catch (e) { err.textContent = e.message; }
     };
     form.append(el('h4', { textContent: '防封守卫设置' }),
-      el('div', { class: 'team-note', textContent: '守卫只做三件事：检测、提示、在风险出现前拒绝请求（受限地区出口、调用过密、并发过高）。它不会也不能帮你绕过任何平台的风控；受限地区请改用受支持地区的合规出口，或换用该地区合法可用的模型服务商。受限地区清单仅供参考，请以各家官方“支持的国家和地区”页面为准。' }),
+      el('div', { class: 'team-note', textContent: '本站只负责接入各家模型的 API。所在地区不被官方支持时，会直接告知“该地区暂不支持，此处暂不可用”并不再发出请求；调用过密、并发过高时同样会先拒绝。受限地区清单仅供参考，请以各家官方“支持的国家和地区”页面为准。' }),
       el('div', { class: 'team-form' }, el('label', {}, enabled, ' 启用拒绝'), restricted, el('label', {}, '引擎每小时上限 ', hourly), el('label', {}, '引擎并发上限 ', conc), proxy,
         el('div', { class: 'team-note', style: 'margin-top:10px' }, el('strong', { textContent: 'CleanIP 纯净度检测（可选）' }),
-          el('div', { textContent: '为什么需要：Claude、OpenAI 等官方服务对出口 IP 的信誉很敏感，被滥用的共享机房 IP、VPN / 代理 IP 容易被要求验证、限流，甚至影响账号。内置检测只能粗略判断“是不是机房 / 代理”；CleanIP 会给出 0–100 的纯净度评分、IP 类型和黑名单命中情况，让上面的“综合研判”更准。' }),
+          el('div', { textContent: '为什么需要：官方服务对出口 IP 的信誉比较敏感，共享机房 IP、VPN / 代理 IP 可能被要求额外验证或限流。内置检测只能粗略判断“是不是机房 / 代理”；CleanIP 会给出 0–100 的纯净度评分和 IP 类型，让上面的“综合研判”更准。它只用于提示，不影响是否放行请求。' }),
           el('div', { textContent: '怎么用：到 cleanip.io/account 免费注册并创建密钥（cip_ 开头，免费账号每天 20 个不同 IP），填在下面，再勾选启用。不用它完全不影响使用，综合研判只用本地信号。' }),
           el('div', { textContent: '隐私：启用并填了密钥后，会把服务器的出口 IP 发给 cleanip.io；没填密钥或没勾选时不会发任何请求。' }),
           el('div', { style: 'color:' + (g.cleanipEnabled && g.hasCleanipKey ? COLORS.ok : g.cleanipEnabled ? COLORS.warn : 'inherit'), textContent: '当前状态：' + (g.cleanipEnabled ? (g.hasCleanipKey ? '已启用，密钥 ' + g.cleanipKey : '安装时选择了启用，还差填写你自己的 CleanIP 密钥') : '未启用') })),
         el('label', {}, cleanipOn, ' 启用 CleanIP（免费账号每天 20 个不同 IP，同一出口 6 小时内只查一次）'), cleanip,
         el('button', { type: 'button', class: 'secondary', textContent: '保存', on: { click: () => save(false) } }), g.hasProxy ? el('button', { type: 'button', class: 'secondary', textContent: '清除出口代理', on: { click: () => save(true) } }) : null, g.hasCleanipKey ? el('button', { type: 'button', class: 'secondary', textContent: '清除 CleanIP 密钥', on: { click: () => save('cleanip') } }) : null));
-    body.append(el('div', { style: 'display:flex;gap:10px;align-items:center' }, el('button', { type: 'button', class: 'secondary', textContent: '立即检测', on: { click: () => poll(true) } }), status), err, live, form,
-      el('div', { class: 'team-note', textContent: '提示：Claude Code / Codex 的“订阅账号登录”与“官方 API Key”风险不同——多人共用同一个个人订阅账号通常违反服务条款，被封风险最高；团队使用请让每人用自己的账号，或统一使用官方 API Key。' }));
+    const everySelect = el('select', { on: { change: () => { localStorage.setItem('envCheckEvery', everySelect.value); restartTimer(); if (data?.result) draw(); } } }, EVERY.map(([v, t]) => el('option', { value: v, textContent: t, selected: v === everySec() })));
+    body.append(el('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap' }, el('button', { type: 'button', class: 'secondary', textContent: '立即检测', on: { click: () => poll(true) } }), el('label', { style: 'font-size:13px' }, '自动检测间隔 ', everySelect), status), err, live, form,
+      el('div', { class: 'team-note', textContent: '提示：Claude Code / Codex 的“订阅账号登录”与“官方 API Key”不同——多人共用同一个个人订阅账号通常不符合服务条款；团队使用请让每人用自己的账号，或统一使用官方 API Key。' }));
     poll(false);
-    timer = setInterval(() => { if (!body.isConnected) clearInterval(timer); else poll(true); }, 10000);
+    const restartTimer = () => { clearInterval(timer); timer = everySec() ? setInterval(() => { if (!body.isConnected) clearInterval(timer); else poll(true); }, everySec() * 1000) : null; };
+    restartTimer();
   }
 
   async function renderService(body) {
@@ -1965,7 +2001,68 @@
       el('p', { class: 'team-note', textContent: info.message }),
       el('p', { class: 'team-note', textContent: '原生部署（systemd）更新命令：' }), native,
       el('p', { class: 'team-note', textContent: 'Docker 部署更新命令：' }), docker,
-      el('p', { class: 'team-note', textContent: '更新会重启服务。当前网页只负责检测和提醒，不会未经确认自动重启生产服务。' }), err);
+      el('p', { class: 'team-note', textContent: '更新会重启服务。没有你的确认不会自动更新。' }), err,
+      el('h3', { textContent: '上传压缩包更新（不用在服务器上敲命令）' }), uploadPanel());
+  }
+  // 上传新版发布包 + 粘贴它的 SHA256 校验值；校验值对得上才会让你点“更新”。需要原生安装并启用“更新助手”。
+  function uploadPanel() {
+    const box = el('div', {}), msg = el('div', { class: 'team-note' }), err = errBox();
+    const file = el('input', { type: 'file', accept: '.zip,application/zip' });
+    const bar = el('progress', { max: 100, value: 0, hidden: true, style: 'width:100%' });
+    const downgrade = el('input', { type: 'checkbox' }), upBtn = el('button', { type: 'button', class: 'secondary', textContent: '上传并校验' });
+    const pendingBox = el('div', {}), logBox = el('pre', { class: 'team-code', hidden: true, style: 'max-height:220px;overflow:auto' });
+    const show = text => { msg.textContent = text; };
+    const renderPending = (pending, current) => {
+      pendingBox.replaceChildren();
+      if (!pending) return;
+      const applyBtn = el('button', { type: 'button', class: 'primary', textContent: pending.newer ? `更新到 ${pending.version}` : `仍然更新到 ${pending.version}（不高于当前版本）`, on: { click: async () => {
+        if (!confirm(`确认从 ${current} 更新到 ${pending.version}？\n更新前会先备份数据，期间服务会重启几十秒；新版本没起来会自动回滚。`)) return;
+        applyBtn.disabled = true; err.textContent = '';
+        try { await api('/api/admin/service-update/apply', { method: 'POST', body: JSON.stringify({ confirm: true, sha256: pending.sha256, allowDowngrade: downgrade.checked }) }); watch(current, pending.version); }
+        catch (e) { err.textContent = e.message; applyBtn.disabled = false; }
+      } } });
+      pendingBox.append(el('div', { class: 'team-row', style: 'display:block;border-color:var(--accent)' },
+        el('div', { textContent: `官方签名已验证：${pending.name}（${(pending.size / 1048576).toFixed(1)} MB）　版本 ${pending.version}${pending.withClients ? '　含客户端安装包' : ''}` }),
+        el('div', { class: 'team-note', style: 'word-break:break-all', textContent: 'SHA256：' + pending.sha256 }),
+        pending.newer ? null : el('label', { style: 'font-size:13px' }, downgrade, ' 允许降级 / 重装同版本'),
+        el('div', { style: 'display:flex;gap:8px;margin-top:6px' }, applyBtn, el('button', { type: 'button', class: 'secondary', textContent: '放弃', on: { click: async () => { await api('/api/admin/service-update/pending', { method: 'DELETE' }).catch(() => {}); load(); } } }))));
+    };
+    // 更新开始后服务会重启：等页面连得上再读结果（成功 / 失败已回滚）
+    const watch = (from, to) => {
+      pendingBox.replaceChildren(); show(`正在更新 ${from} → ${to}：先备份，再替换程序并重启，通常需要 1–3 分钟，请不要关闭本页。`); upBtn.disabled = true;
+      const t = setInterval(async () => {
+        try {
+          const r = await fetch('/api/admin/service-update/status', { credentials: 'same-origin' }); if (!r.ok) return; const d = await r.json(), st = d.status || {};
+          if (st.state === 'ok') { clearInterval(t); show(`更新完成：现在是 ${d.currentVersion}。请按 Ctrl+F5 刷新页面。`); logBox.hidden = true; }
+          else if (st.state === 'failed') { clearInterval(t); show('更新没有成功，已自动回滚到旧版本（服务应已恢复）。日志如下：'); logBox.textContent = st.log || ''; logBox.hidden = false; upBtn.disabled = false; }
+        } catch { /* 服务重启中，继续等 */ }
+      }, 4000);
+    };
+    const load = async () => {
+      try {
+        const d = await api('/api/admin/service-update/status');
+        if (!d.available) { upBtn.disabled = true; show('这台服务器不能在网页里更新（' + d.reason + '）。Docker 部署：在安装目录运行 ./install.sh enable-updater 启用一次更新器即可；原生安装：旧版本的更新助手不认识这个功能，第一次需要在新版本目录里运行 sudo bash deploy/yumeiro-native.sh update。'); return; }
+        if (d.status.state === 'running') return watch(d.status.from, d.status.version);
+        upBtn.disabled = false; renderPending(d.pending, d.currentVersion);
+        if (d.status.state === 'failed') { show('上一次更新失败，已回滚。日志如下：'); logBox.textContent = d.status.log || ''; logBox.hidden = false; }
+        else show(d.pending ? '' : `当前版本 ${d.currentVersion}。到发布页下载新版的 Yumeiro-x.y.z.zip，填上它的 SHA256，上传即可。`);
+      } catch (e) { err.textContent = e.message; }
+    };
+    upBtn.addEventListener('click', () => {
+      err.textContent = ''; const f = file.files[0];
+      if (!f) { err.textContent = '请先选择压缩包'; return; }
+      const xhr = new XMLHttpRequest(); xhr.open('PUT', '/api/admin/service-update/upload'); xhr.withCredentials = true;
+      xhr.setRequestHeader('X-CSRF-Token', csrf); xhr.setRequestHeader('X-File-Name', encodeURIComponent(f.name)); xhr.setRequestHeader('Content-Type', 'application/zip');
+      bar.hidden = false; bar.value = 0; upBtn.disabled = true; show('正在上传…');
+      xhr.upload.onprogress = e => { if (e.lengthComputable) bar.value = e.loaded / e.total * 100; };
+      xhr.onload = () => { bar.hidden = true; upBtn.disabled = false; let d = {}; try { d = JSON.parse(xhr.responseText); } catch { /* 忽略 */ }
+        if (xhr.status === 200) { show('上传完成，官方签名验证通过。'); renderPending(d.pending, d.currentVersion); } else { err.textContent = d.error || ('上传失败（HTTP ' + xhr.status + '）'); err.style.whiteSpace = 'pre-wrap'; show(''); } };
+      xhr.onerror = () => { bar.hidden = true; upBtn.disabled = false; err.textContent = '网络中断，上传失败'; };
+      xhr.send(f);
+    });
+    box.append(el('p', { class: 'team-note', textContent: '步骤：到发布页下载官方发布的新版压缩包（Yumeiro-x.y.z.zip）→ 在这里选择并上传。不需要填写任何校验值：服务器会自己用内置的官方公钥验证包里的签名，并逐个核对包内文件，不是官方发布的、或被改动过的包会直接拒绝并删除；验证通过才出现“更新”按钮。更新前会自动备份，新版本没起来会自动回滚。' }),
+      file, upBtn, bar, msg, err, pendingBox, logBox);
+    load(); return box;
   }
 
   async function renderSite(body) {
@@ -2119,21 +2216,31 @@
   }
   async function renderMembers(body) {
     const { members } = await api('/api/admin/members');
-    const err = errBox(), f = { email: el('input', { type: 'email', placeholder: '成员邮箱' }), name: el('input', { placeholder: '显示名称（可选）' }), pw: el('input', { type: 'password', placeholder: '初始密码（至少 12 位）', autocomplete: 'new-password' }), limit: el('input', { type: 'number', min: 0, placeholder: '每日调用上限（0=不限）' }), mcalls: el('input', { type: 'number', min: 0, placeholder: '每月调用上限（0=不限）' }), mtokens: el('input', { type: 'number', min: 0, placeholder: '每月 Token 上限（0=不限）' }) };
+    const err = errBox(), f = { email: el('input', { type: 'email', placeholder: '成员邮箱' }), name: el('input', { placeholder: '显示名称（可选）' }), pw: el('input', { type: 'password', placeholder: '初始密码（至少 12 位）', autocomplete: 'new-password' }), limit: el('input', { type: 'number', min: 0, placeholder: '每日调用上限（0=不限）' }), mcalls: el('input', { type: 'number', min: 0, placeholder: '每月调用上限（0=不限）' }), mtokens: el('input', { type: 'number', min: 0, placeholder: '每月 Token 上限（0=不限）' }), htokens: el('input', { type: 'number', min: 0, placeholder: '每小时 Token 上限（0=不限）' }) };
     const patch = async (m, data) => { try { await api('/api/admin/members/' + m.id, { method: 'PATCH', body: JSON.stringify(data) }); render(); } catch (e) { alert(e.message); } };
     body.append(
       el('p', { class: 'team-note', textContent: '你是主账号。成员使用邮箱和密码登录，只能看到自己的对话；每日调用上限同时约束网页和 API。' }),
-      el('div', { class: 'team-form' }, f.email, f.name, f.pw, f.limit, f.mcalls, f.mtokens, el('button', { type: 'button', class: 'secondary wide', textContent: '添加成员', on: { click: async () => {
-        try { await api('/api/admin/members', { method: 'POST', body: JSON.stringify({ email: f.email.value, displayName: f.name.value, password: f.pw.value, dailyLimit: Number(f.limit.value || 0), monthlyCallLimit: Number(f.mcalls.value || 0), monthlyTokenLimit: Number(f.mtokens.value || 0) }) }); render(); } catch (e) { err.textContent = e.message; }
+      el('div', { class: 'team-form' }, f.email, f.name, f.pw, f.limit, f.mcalls, f.mtokens, f.htokens, el('button', { type: 'button', class: 'secondary wide', textContent: '添加成员', on: { click: async () => {
+        try { await api('/api/admin/members', { method: 'POST', body: JSON.stringify({ email: f.email.value, displayName: f.name.value, password: f.pw.value, dailyLimit: Number(f.limit.value || 0), monthlyCallLimit: Number(f.mcalls.value || 0), monthlyTokenLimit: Number(f.mtokens.value || 0), hourlyTokenLimit: Number(f.htokens.value || 0) }) }); render(); } catch (e) { err.textContent = e.message; }
       } } })), err,
-      members.map(m => el('div', { class: 'team-row' }, el('div', { class: 'grow' }, `${m.displayName}（${m.role === 'admin' ? '主账号' : '成员'}）${m.disabled ? ' · 已停用' : ''}`, el('small', { textContent: `${m.email}　今日 ${m.todayCalls}/${m.dailyLimit || '∞'}　本月 ${num(m.month.calls)}/${m.monthlyCallLimit || '∞'} 次、${num(m.month.totalTokens)}/${m.monthlyTokenLimit || '∞'} tokens　令牌 ${m.tokens}　最近登录 ${fmt(m.lastLoginAt)}` })),
+      members.map(m => el('div', { class: 'team-row' }, el('div', { class: 'grow' }, `${m.displayName}（${m.role === 'admin' ? '主账号' : '成员'}）${m.disabled ? ' · 已停用' : ''}`, el('small', { textContent: `${m.email}　今日 ${m.todayCalls}/${m.dailyLimit || '∞'}　本月 ${num(m.month.calls)}/${m.monthlyCallLimit || '∞'} 次、${num(m.month.totalTokens)}/${m.monthlyTokenLimit || '∞'} tokens　令牌 ${m.tokens}　使用时段 ${m.allowedHours ? m.allowedHours.start + '–' + m.allowedHours.end : '不限'}　最近登录 ${fmt(m.lastLoginAt)}` })),
         m.role !== 'admin' && el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' },
           el('button', { type: 'button', class: 'secondary', textContent: m.disabled ? '启用' : '停用', on: { click: () => patch(m, { disabled: !m.disabled }) } }),
           el('button', { type: 'button', class: 'secondary', textContent: '额度', on: { click: () => {
-            const v = prompt('额度：每日调用 / 每月调用 / 每月 Token（0=不限，用 / 分隔）', [m.dailyLimit, m.monthlyCallLimit, m.monthlyTokenLimit].join(' / '));
+            const v = prompt('额度：每日调用 / 每月调用 / 每月 Token / 每小时 Token（0=不限，用 / 分隔）', [m.dailyLimit, m.monthlyCallLimit, m.monthlyTokenLimit, m.hourlyTokenLimit || 0].join(' / '));
             if (v === null) return;
-            const [d, c, t] = v.split('/').map(x => Number(x.trim() || 0));
-            patch(m, { dailyLimit: d, monthlyCallLimit: c ?? 0, monthlyTokenLimit: t ?? 0 });
+            const [d, c, t, h] = v.split('/').map(x => Number(x.trim() || 0));
+            patch(m, { dailyLimit: d, monthlyCallLimit: c ?? 0, monthlyTokenLimit: t ?? 0, hourlyTokenLimit: h ?? 0 });
+          } } }),
+          el('button', { type: 'button', class: 'secondary', textContent: '使用时段', on: { click: () => {
+            const v = prompt('允许使用的时段（服务器本地时间，24 小时制），格式 开始-结束，如 09:00-18:00；跨午夜可写 22:00-06:00；留空=不限制', m.allowedHours ? m.allowedHours.start + '-' + m.allowedHours.end : '');
+            if (v === null) return;
+            const text = v.replace(/[\s　]/g, '').replace(/[—–～~至到]/g, '-').replace(/：/g, ':');
+            if (!text) return patch(m, { allowedHours: null });
+            const hit = text.match(/^(\d{1,2}:\d{2})-(\d{1,2}:\d{2})$/);
+            if (!hit) return alert('格式不对，应为 09:00-18:00');
+            const pad = t => t.padStart(5, '0');
+            patch(m, { allowedHours: { start: pad(hit[1]), end: pad(hit[2]) } });
           } } }),
           el('button', { type: 'button', class: 'secondary', textContent: '重置密码', on: { click: () => { const v = prompt('新密码（至少 12 位）'); if (v) patch(m, { password: v }); } } }),
           el('button', { type: 'button', class: 'secondary', textContent: '删除', on: { click: async () => { if (!confirm('删除成员及其全部对话、令牌？不可恢复。')) return; try { await api('/api/admin/members/' + m.id, { method: 'DELETE' }); render(); } catch (e) { alert(e.message); } } } })))));

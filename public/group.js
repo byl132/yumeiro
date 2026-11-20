@@ -86,6 +86,27 @@
       el('button', { type: 'button', className: 'chat-title', textContent: '👥 ' + g.title, title: g.members.map(m => m.label).join('、'), on: { click: () => openGroup(g.id) } }),
       el('button', { type: 'button', className: 'del', textContent: '×', title: '删除群聊', on: { click: async e => { e.stopPropagation(); if (!confirm('删除群聊“' + g.title + '”？')) return; try { await api('/api/groups/' + g.id, { method: 'DELETE' }); if (current?.id === g.id) closePanel(); loadList(); } catch (x) { alert(x.message); } } } }))) : [el('div', { className: 'empty-list', textContent: '还没有群聊' })]));
   }
+  // 群聊用量：Token 与费用（价格由主账号按模型设置；没设价格的模型只显示 Token）
+  async function showUsage() {
+    if (!current) return;
+    const box = el('div', { className: 'gedit-wrap' });
+    const body = el('div', { className: 'modal', style: 'color:var(--ink);border-radius:14px;padding:18px;width:min(720px,100%);max-height:90vh;overflow:auto;display:grid;gap:10px' });
+    box.append(body); document.body.append(box);
+    const close = el('button', { type: 'button', className: 'secondary', textContent: '关闭', on: { click: () => box.remove() } });
+    try {
+      const r = await api('/api/groups/' + current.id + '/usage'), cur = r.currency, n = v => Number(v || 0).toLocaleString();
+      const money = v => r.priced ? cur + (Math.round((v || 0) * 10000) / 10000).toLocaleString() : '未设价格';
+      const table = (rows, key, title) => el('table', { style: 'width:100%;border-collapse:collapse;font-size:13px' },
+        el('thead', {}, el('tr', {}, [title, '调用', '输入', '输出', '合计 Token', '费用'].map(t => el('th', { style: 'text-align:left;padding:4px 6px;border-bottom:1px solid var(--line)', textContent: t })))),
+        el('tbody', {}, rows.length ? rows.map(x => el('tr', {}, [x[key], n(x.calls), n(x.inputTokens), n(x.outputTokens), n(x.totalTokens), money(x.cost)].map(v => el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--line);word-break:break-all', textContent: String(v) })))) : [el('tr', {}, el('td', { colSpan: 6, style: 'padding:6px', textContent: '本月还没有用量' }))]));
+      body.replaceChildren(el('h3', { style: 'margin:0', textContent: '群聊用量 · ' + current.title }),
+        el('div', { style: 'font-size:13px', textContent: `本月（${r.month}）共 ${n(r.thisMonth.total.calls)} 次调用，${n(r.thisMonth.total.totalTokens)} tokens，费用 ${money(r.thisMonth.total.cost)}；累计 ${n(r.allTime.total.totalTokens)} tokens，费用 ${money(r.allTime.total.cost)}。` }),
+        el('h4', { style: 'margin:6px 0 0', textContent: '本月 · 每位成员' }), table(r.thisMonth.members, 'label', '成员'),
+        el('h4', { style: 'margin:6px 0 0', textContent: '本月 · 每个模型' }), table(r.thisMonth.models, 'model', '模型'),
+        el('div', { style: 'font-size:12px;color:var(--muted)', textContent: 'Token 为模型服务商返回的用量；服务商没有返回用量的调用只计次数。' }),
+        el('div', { style: 'display:flex;justify-content:flex-end' }, close));
+    } catch (x) { body.replaceChildren(el('div', { style: 'color:#d33', textContent: x.message }), el('div', { style: 'display:flex;justify-content:flex-end' }, close)); }
+  }
   async function openGroup(id) {
     try {
       const data = await api('/api/groups/' + id);
@@ -126,6 +147,7 @@
   }
 
   // 新建 / 编辑群聊
+  const DEFAULT_MEMBERS = 4;
   async function editGroup(group) {
     let models = [];
     try { agents = (await api('/api/agents')).agents; } catch { agents = []; }
@@ -158,7 +180,11 @@
       }
     };
     (group?.members || []).forEach(addRow);
-    if (!group) { if (models.length) addAllModels(); else { addRow({ label: '成员甲' }); addRow({ label: '成员乙' }); } }
+    if (!group) { // 新建时默认 4 位成员（取前 4 个可用模型，不够就用默认模型补齐），之后可以用“添加成员”继续加
+      const names = new Set(); const fresh = (base) => { let name = safeName(base), n = 2; while (names.has(name)) name = safeName(base) + n++; names.add(name); return name; };
+      for (const m of models.slice(0, DEFAULT_MEMBERS)) { const h = hintFor(m.model + ' ' + (m.label || '')); addRow({ label: fresh(m.label || m.model), model: m.ref, role: h[1], strengths: h[2] }); }
+      for (let i = rows.children.length; i < DEFAULT_MEMBERS; i++) addRow({ label: fresh('成员' + (i + 1)) });
+    }
     const title = el('input', { placeholder: '群聊名称', maxLength: 60, value: group?.title || '' });
     const mode = el('select', {}, Object.entries(MODES).map(([v, t]) => el('option', { value: v, textContent: t }))); mode.value = group?.mode || 'pm';
     const rounds = el('input', { type: 'number', min: 1, max: 6, value: group?.rounds || (mode.value === 'pm' ? 4 : 2), style: 'width:70px' });
@@ -171,7 +197,7 @@
       el('div', { className: 'modal', style: 'color:var(--ink);border-radius:14px;padding:18px;width:min(760px,100%);max-height:90vh;overflow:auto;display:grid;gap:10px' },
         el('h3', { style: 'margin:0', textContent: group ? '群聊设置' : '新建群聊' }), title,
         el('label', {}, '方式 ', mode), pmBox,
-        el('div', { style: 'font-size:12px;color:var(--muted)', textContent: '成员：每个模型一个身份（名称 + 身份 + 擅长）。产品经理会根据“擅长”把任务分给最合适的人。身份和擅长是按模型名给的默认建议，你可以随意修改。' }), rows,
+        el('div', { style: 'font-size:12px;color:var(--muted)', textContent: '默认 4 位成员，需要更多可以点“添加成员”（最多 12 位）。每个模型一个身份（名称 + 身份 + 擅长）。产品经理会根据“擅长”把任务分给最合适的人。身份和擅长是按模型名给的默认建议，你可以随意修改。' }), rows,
         el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' },
           el('button', { type: 'button', className: 'secondary', textContent: '＋ 添加成员', on: { click: () => rows.children.length < 12 && addRow() } }),
           el('button', { type: 'button', className: 'secondary', textContent: '＋ 把我能用的所有模型都加进来', on: { click: addAllModels } })),
@@ -227,6 +253,7 @@ html[data-theme=dark] #groupPanel .bubble.error{background:#2a1a1e;color:#ffb4bd
     chipsEl = el('div', { className: 'gchips' }); statusEl = el('div', { className: 'gstatus' });
     panel = el('div', { id: 'groupPanel', hidden: true, style: 'position:absolute;inset:0;z-index:5;display:flex;flex-direction:column' },
       el('div', { style: 'display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line)' }, titleEl,
+        el('button', { type: 'button', className: 'secondary', textContent: '用量', on: { click: showUsage } }),
         el('button', { type: 'button', className: 'secondary', textContent: '设置', on: { click: () => current && editGroup(current) } }),
         el('button', { type: 'button', className: 'secondary', textContent: '关闭', on: { click: closePanel } })),
       chipsEl, msgBox, statusEl, el('div', { className: 'gcomposer' }, input, sendBtn, stopBtn));

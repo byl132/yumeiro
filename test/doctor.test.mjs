@@ -9,7 +9,6 @@ const healthy = () => ({
   local: false, trustProxy: true, cookieSecure: true, passwordFile: { configured: true, exists: false }, adminIpRestricted: false,
   providers: { enabled: 2, defaultModel: 'a/b', resolved: true, probes: null }, runner: { enabled: true, health: { ok: true, engines: { claude: { installed: true } } } },
   features: { voice: true, tts: false, vision: true, imagegen: false }, dns: [{ host: 'a', ok: true, ms: 20 }], clock: { driftMs: 800 },
-  env: { egress: { ip: '1.1.1.1', country: 'US' }, vendors: { claude: { name: 'Claude', level: 'ok', probes: [{ label: 'API', reachable: true, ms: 100 }], reasons: [], advice: [] } } },
   downloads: ['Yumeiro-Setup-0.4.0.exe'], wallpapers: 3, counts: { users: 2, conversations: 5, audit: 9 }
 });
 const level = (checks, title) => checks.find(c => c.title === title)?.level;
@@ -45,11 +44,10 @@ test('服务器体检：反向代理配置不一致会提示；官方端点结�
   s.forwardedSeen = false; s.trustProxy = true; s.local = false;
   assert.equal(level(buildChecks(s), '反向代理与 IP 记录'), 'warn', '直接暴露端口却信任 X-Forwarded-For');
   s.local = true; assert.equal(level(buildChecks(s), '反向代理与 IP 记录'), 'ok');
-  s.env.vendors.claude = { name: 'Claude', level: 'danger', probes: [{ label: 'API', reachable: false }], reasons: [{ level: 'danger', text: '出口在受限地区' }], advice: ['换出口'] };
-  const checks = buildChecks(s), v = checks.find(c => c.title === 'Claude 可达性');
-  assert.equal(v.level, 'fail'); assert.match(v.detail, /受限地区/); assert.equal(v.hint, '换出口');
+  const checks = buildChecks(s);
+  assert.ok(!checks.some(c => c.title === '出口 IP' || /可达性/.test(c.title)), '体检里不再包含环境检测的内容');
   const result = { at: Date.now(), summary: summarize(checks), checks };
   const text = reportText(result, '测试站');
-  assert.match(text, /测试站 服务器体检/); assert.match(text, /\[处理\] Claude 可达性/); assert.match(text, /建议：换出口/);
+  assert.match(text, /测试站 服务器体检/); assert.doesNotMatch(text, /出口 IP|可达性/);
   assert.doesNotMatch(text, /建议：.*\n.*\[正常\]\s*$/);
 });

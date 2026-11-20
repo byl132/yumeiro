@@ -88,7 +88,7 @@ struct LoginView: View {
                     Button { Task { await model.login() } } label: { Text(model.loginBusy ? "登录中…" : "登录").frame(maxWidth: .infinity).padding(.vertical, 6) }
                         .buttonStyle(.borderedProminent).disabled(model.loginBusy)
                 }.glassCard(20).frame(maxWidth: 440)
-                Text("账号由团队管理员创建，管理员和成员使用同一个登录入口。").font(.caption).foregroundStyle(.secondary).frame(maxWidth: 440, alignment: .leading)
+                Text("账号由团队管理员创建。管理员请用网页版的 /admin 入口登录管理后台。").font(.caption).foregroundStyle(.secondary).frame(maxWidth: 440, alignment: .leading)
             }.padding(24).frame(maxWidth: .infinity)
         }
     }

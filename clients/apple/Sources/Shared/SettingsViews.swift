@@ -97,6 +97,7 @@ struct SettingsRoot: View {
                     case .market: MarketView()
                     case .admin: AdminView()
                     case .security: SecurityView()
+                    case .workspace: WorkspaceView()
                     case .settings: EmptyView()
                     }
                 }
@@ -144,6 +145,7 @@ struct SettingsView: View {
                 NavigationLink(value: Page.agents) { VStack(alignment: .leading) { Text("智能体"); Text("新建、编辑、选择").font(.caption).foregroundStyle(.secondary) } }
                 NavigationLink(value: Page.skills) { VStack(alignment: .leading) { Text("技能"); Text("自己写，或从市场安装").font(.caption).foregroundStyle(.secondary) } }
                 NavigationLink(value: Page.market) { VStack(alignment: .leading) { Text("技能市场"); Text("浏览并一键安装").font(.caption).foregroundStyle(.secondary) } }
+                NavigationLink(value: Page.workspace) { VStack(alignment: .leading) { Text("工作区"); Text("查看工作区和协作成员").font(.caption).foregroundStyle(.secondary) } }
                 if model.isAdmin { NavigationLink(value: Page.security) { VStack(alignment: .leading) { Text("网页找回密码确认"); Text("输入网页上的验证码，批准或拒绝").font(.caption).foregroundStyle(.secondary) } } }
                 if model.isAdmin { NavigationLink(value: Page.admin) { VStack(alignment: .leading) { Text("管理"); Text("成员、用量、MCP 开关").font(.caption).foregroundStyle(.secondary) } } }
             }

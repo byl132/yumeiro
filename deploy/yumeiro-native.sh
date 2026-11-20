@@ -34,7 +34,7 @@
 set -euo pipefail
 umask 022   # root 的 umask 过严（如 077）时，新建的程序目录会变成 700，服务账号进不去（status=200/CHDIR）；密钥文件另有自己的 umask 077
 
-APP_DIR=/opt/yumeiro
+APP_DIR=/cindy/Yumeiro
 CONF_DIR=/etc/yumeiro
 SECRETS_DIR=$CONF_DIR/secrets
 RUNNER_SECRET_DIR=$CONF_DIR/runner
@@ -52,8 +52,9 @@ die()  { printf '\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 command -v systemctl >/dev/null || die "需要 systemd。没有 systemd 的系统请用 Docker 版本。"
 
 CMD="${1:-}"; shift || true
-PORT=8787; DOMAIN=""; ADMIN_EMAIL="admin@example.com"; WITH_RUNNER=0; PERSONAL=0; PG_URL=""
+PORT=8787; DOMAIN=""; ADMIN_EMAIL="admin@example.com"; WITH_RUNNER=1; PERSONAL=0; PG_URL=""
 NO_ENGINES=0; MODEL_URL=""; MODEL_NAME=""; MODEL_KEY=""; NPM_REGISTRY=""; BACKUP_KEEP=14; CLIENTS_DIR=""
+WEB_SETUP=1
 ASSUME_YES=0; INSTALL_NODE=0; NODE_MIRROR=""; TLS_PORT=""; TLS_IP=""; TLS_CERT=""; TLS_KEY=""; INSTALL_NGINX=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -70,6 +71,7 @@ while [ $# -gt 0 ]; do
     --npm-registry) NPM_REGISTRY="$2"; shift 2 ;;
     --backup-keep) BACKUP_KEEP="$2"; shift 2 ;;
     --clients) CLIENTS_DIR="$2"; shift 2 ;;
+    --no-web-setup) WEB_SETUP=0; shift ;;
     --install-node) INSTALL_NODE=1; shift ;;
     --node-mirror) NODE_MIRROR="$2"; shift 2 ;;
     --tls-port) TLS_PORT="$2"; shift 2 ;;
@@ -155,13 +157,14 @@ check_node() {
 sync_code() {
   [ "$SRC" != "$APP_DIR" ] || die "请在新版本解压出来的目录里运行本脚本，不要在 /opt/yumeiro 里运行"
   mkdir -p "$APP_DIR"
-  for item in server.mjs storage.mjs providers.mjs collab.mjs platform-models.mjs market.mjs market-sources.mjs asr.mjs asr-native.mjs memory.mjs audit.mjs envcheck.mjs doctor.mjs mcp.mjs mcp-market.mjs docs.mjs docparse.mjs images.mjs tts.mjs ziputil.mjs vision.mjs remote.mjs recover.mjs project.mjs package.json package-lock.json; do
+  for item in server.mjs storage.mjs providers.mjs collab.mjs platform-models.mjs market.mjs market-sources.mjs asr.mjs asr-native.mjs memory.mjs audit.mjs envcheck.mjs doctor.mjs mcp.mjs mcp-market.mjs docs.mjs docparse.mjs images.mjs tts.mjs ziputil.mjs updatepkg.mjs vision.mjs remote.mjs recover.mjs project.mjs package.json package-lock.json; do
     [ -f "$SRC/$item" ] && install -m 0644 "$SRC/$item" "$APP_DIR/$item"
   done
   rm -rf "$APP_DIR/public" "$APP_DIR/scripts" "$APP_DIR/runner"
   cp -r "$SRC/public" "$SRC/scripts" "$APP_DIR/"
   rm -rf "$APP_DIR/public/downloads"          # 客户端安装包不随程序部署，放在 $DATA_DIR/downloads（见 scripts/install-clients.mjs）
   mkdir -p "$APP_DIR/runner"; cp "$SRC"/runner/*.mjs "$APP_DIR/runner/"
+  mkdir -p "$APP_DIR/setup"; cp "$SRC"/setup/*.mjs "$APP_DIR/setup/"
   mkdir -p "$APP_DIR/deploy"; cp "$SRC"/deploy/* "$APP_DIR/deploy/"; chmod +x "$APP_DIR"/deploy/*.sh
   chown -R root:root "$APP_DIR"
   chmod 755 "$APP_DIR"; chmod -R go+rX "$APP_DIR"   # 服务以 yumeiro 用户运行：root 的 umask 过严（如 077）时目录会是 700，导致 status=200/CHDIR
@@ -235,6 +238,36 @@ PrivateTmp=true
 ReadWritePaths=$WORK_DIR
 MemoryMax=2G
 TasksMax=256
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  fi
+  if [ "$WEB_SETUP" = 1 ]; then
+    cat > /etc/systemd/system/yumeiro-setup-helper.service <<EOF
+[Unit]
+Description=Yumeiro 首次安装受限助手
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=yumeiro
+WorkingDirectory=$APP_DIR
+Environment=SETUP_HELPER_SOCKET=/run/yumeiro/setup-helper.sock
+Environment=SETUP_HELPER_TOKEN_FILE=$SECRETS_DIR/setup_helper_token
+Environment=YUMEIRO_APP_DIR=$APP_DIR
+Environment=DATA_DIR=$DATA_DIR
+ExecStart=$node $APP_DIR/setup/setup-helper.mjs
+Restart=on-failure
+NoNewPrivileges=false
+PrivateTmp=true
+ProtectSystem=no
+ProtectHome=true
+RuntimeDirectory=yumeiro
+RuntimeDirectoryMode=0750
+CacheDirectory=yumeiro-setup
+UMask=0007
 
 [Install]
 WantedBy=multi-user.target
@@ -453,7 +486,8 @@ install)
   id yumeiro >/dev/null 2>&1 || useradd --system --gid yumeiro --home-dir "$DATA_DIR" --shell /usr/sbin/nologin yumeiro
   mkdir -p "$DATA_DIR" "$DATA_DIR/downloads" "$SECRETS_DIR" "$BACKUP_DIR"
   chown yumeiro:yumeiro "$DATA_DIR"; chmod 700 "$DATA_DIR"
-  chown root:yumeiro "$CONF_DIR" "$SECRETS_DIR"; chmod 750 "$CONF_DIR" "$SECRETS_DIR"
+  chown root:yumeiro "$CONF_DIR" "$SECRETS_DIR"; chmod 750 "$SECRETS_DIR"
+  chmod 751 "$CONF_DIR"   # 运行器用户要穿过 /etc/yumeiro 才能读到 runner/runner_token；只给“进入”权限（不能列目录），secrets 目录仍是 750，运行器读不到数据库密钥和模型 Key
 
   gen() { # gen 文件名 命令...：不存在才生成，已有的绝不覆盖（加密密钥丢了数据就解不开）
     local f="$SECRETS_DIR/$1"; shift
@@ -461,16 +495,25 @@ install)
     chown root:yumeiro "$f"; chmod 640 "$f"
   }
   gen store_encryption_key openssl rand -base64 32
-  [ -n "$MODEL_KEY" ] && { [ -s "$SECRETS_DIR/model_api_key" ] || { umask 077; printf '%s' "$MODEL_KEY" > "$SECRETS_DIR/model_api_key"; }; chown root:yumeiro "$SECRETS_DIR/model_api_key"; chmod 640 "$SECRETS_DIR/model_api_key"; }
-  GENERATED=""
-  if [ ! -s "$SECRETS_DIR/admin_password" ] && [ ! -s "$DATA_DIR/.initialized" ]; then
-    ( umask 077; openssl rand -base64 18 | tr -d '/+=' | cut -c1-20 > "$SECRETS_DIR/admin_password" ); GENERATED="$(cat "$SECRETS_DIR/admin_password")"
-    # 管理员密码需要 ≥16 位，不足时补长
-    while [ "${#GENERATED}" -lt 16 ]; do GENERATED="${GENERATED}$(openssl rand -hex 4)"; done; printf '%s' "$GENERATED" > "$SECRETS_DIR/admin_password"
-    chown root:yumeiro "$SECRETS_DIR/admin_password"; chmod 640 "$SECRETS_DIR/admin_password"
+  if [ "$WEB_SETUP" = 1 ] && [ ! -s "$SECRETS_DIR/setup_token" ] && [ ! -s "$DATA_DIR/.initialized" ]; then
+    ( umask 077; openssl rand -base64 48 | tr -d '/+=' | cut -c1-64 > "$SECRETS_DIR/setup_token" )
+    chown root:yumeiro "$SECRETS_DIR/setup_token"; chmod 640 "$SECRETS_DIR/setup_token"
+  fi
+  if [ "$WEB_SETUP" = 1 ] && [ ! -s "$SECRETS_DIR/setup_helper_token" ]; then
+    ( umask 077; openssl rand -hex 32 > "$SECRETS_DIR/setup_helper_token" )
+    chown root:yumeiro "$SECRETS_DIR/setup_helper_token"; chmod 640 "$SECRETS_DIR/setup_helper_token"
+  fi
+  if [ "$WEB_SETUP" != 1 ]; then
+    GENERATED=""
+    if [ ! -s "$SECRETS_DIR/admin_password" ] && [ ! -s "$DATA_DIR/.initialized" ]; then
+      ( umask 077; openssl rand -base64 18 | tr -d '/+=' | cut -c1-20 > "$SECRETS_DIR/admin_password" ); GENERATED="$(cat "$SECRETS_DIR/admin_password")"
+      # 管理员密码需要 ≥16 位，不足时补长
+      while [ "${#GENERATED}" -lt 16 ]; do GENERATED="${GENERATED}$(openssl rand -hex 4)"; done; printf '%s' "$GENERATED" > "$SECRETS_DIR/admin_password"
+      chown root:yumeiro "$SECRETS_DIR/admin_password"; chmod 640 "$SECRETS_DIR/admin_password"
+    fi
   fi
 
-  sync_code; npm_install
+  [ -n "$MODEL_KEY" ] && { [ -s "$SECRETS_DIR/model_api_key" ] || { umask 077; printf '%s' "$MODEL_KEY" > "$SECRETS_DIR/model_api_key"; }; chown root:yumeiro "$SECRETS_DIR/model_api_key"; chmod 640 "$SECRETS_DIR/model_api_key"; }
 
   if [ ! -f "$ENV_FILE" ]; then
     bind=0.0.0.0; secure=false; proxy=false
@@ -479,7 +522,13 @@ install)
       echo "PORT=$PORT"; echo "HOST=$bind"; echo "DATA_DIR=$DATA_DIR"
       echo "COOKIE_SECURE=$secure"; echo "TRUST_PROXY=$proxy"
       echo "STORE_ENCRYPTION_KEY_FILE=$SECRETS_DIR/store_encryption_key"
-      echo "ADMIN_EMAIL=$ADMIN_EMAIL"; echo "ADMIN_PASSWORD_FILE=$SECRETS_DIR/admin_password"
+      if [ "$WEB_SETUP" = 1 ]; then
+        echo "SETUP_TOKEN_FILE=$SECRETS_DIR/setup_token"
+        echo "SETUP_HELPER_TOKEN_FILE=$SECRETS_DIR/setup_helper_token"
+        echo "SETUP_HELPER_SOCKET=/run/yumeiro/setup-helper.sock"
+      else
+        echo "ADMIN_EMAIL=$ADMIN_EMAIL"; echo "ADMIN_PASSWORD_FILE=$SECRETS_DIR/admin_password"
+      fi
       [ "$PERSONAL" = 1 ] && echo "YUMEIRO_USAGE=personal"
       if [ -n "$PG_URL" ]; then echo "STORAGE=postgres"; echo "DATABASE_URL=$PG_URL"; else echo "STORAGE=json"; fi
       [ -n "$MODEL_URL" ] && echo "MODEL_BASE_URL=$MODEL_URL"
@@ -506,6 +555,7 @@ install)
   if [ "$WITH_RUNNER" = 1 ] && [ "$NO_ENGINES" != 1 ]; then install_engines || warn "有引擎没装上，稍后可执行：sudo $0 engines"; fi
   write_units
   systemctl enable --now yumeiro.service yumeiro-backup.timer >/dev/null
+  [ "$WEB_SETUP" = 1 ] && systemctl enable --now yumeiro-setup-helper.service >/dev/null
   [ "$WITH_RUNNER" = 1 ] && systemctl enable --now yumeiro-runner.service >/dev/null
   touch "$DATA_DIR/.initialized"; chown yumeiro:yumeiro "$DATA_DIR/.initialized"
   health 40 && ok "Yumeiro 已启动" || { warn "服务没有在 40 秒内就绪，查看日志：journalctl -u yumeiro -n 50"; exit 1; }
@@ -514,6 +564,11 @@ install)
 
   port="$(grep -E '^PORT=' "$ENV_FILE" | cut -d= -f2)"
   say ""
+  if [ "$WEB_SETUP" = 1 ] && [ -s "$SECRETS_DIR/setup_token" ]; then
+    SETUP_TOKEN="$(cat "$SECRETS_DIR/setup_token")"
+    if [ -n "$DOMAIN" ]; then say "首次安装向导：请打开 https://$DOMAIN/setup#token=$SETUP_TOKEN"; else say "首次安装向导：请打开 http://$(public_ip || echo 服务器IP):$PORT/setup#token=$SETUP_TOKEN（生产环境请先配置 HTTPS）"; fi
+    unset SETUP_TOKEN
+  fi
   if [ -n "$TLS_PORT" ]; then :
   elif [ -n "$DOMAIN" ]; then
     say "访问方式：在前面的反向代理里把 https://$DOMAIN 转发到 127.0.0.1:$port。Caddy 示例："

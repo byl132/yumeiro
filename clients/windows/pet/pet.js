@@ -730,12 +730,62 @@
   };
   root.addEventListener('pointerup', end); root.addEventListener('pointercancel', end);
   root.addEventListener('contextmenu', e => { e.preventDefault(); if (host) host.menu(); else openMenu(e.clientX, e.clientY); });
+  // ---- 宠物 AI：可以单独聊天、单独选模型（默认跟随主 AI），单独计量；“联动”打开时她能看到主对话的最近几条 ----
+  const mainContext = () => [...document.querySelectorAll('#messages .message')].slice(-6).map(n => ({ role: n.classList.contains('user') ? 'user' : 'assistant', text: (n.querySelector('.bubble')?.textContent || '').trim().slice(0, 250) })).filter(x => x.text);
+  async function petApi(path, options = {}) {
+    const r = await fetch(path, { credentials: 'same-origin', ...options, headers: { Accept: 'application/json', ...(options.body ? { 'Content-Type': 'application/json' } : {}), 'X-CSRF-Token': await getCsrf() } });
+    const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || '请求失败（' + r.status + '）'); return d;
+  }
+  let petChatBox = null;
+  async function openPetChat() {
+    if (petChatBox) { petChatBox.remove(); petChatBox = null; return; }
+    const css = (el, text) => { el.style.cssText = text; return el; };
+    const box = petChatBox = css(document.createElement('div'), 'position:fixed;right:16px;bottom:16px;z-index:2147483000;width:min(340px,calc(100vw - 32px));max-height:70vh;display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:14px;background:var(--panel,#fff);color:var(--ink,#222);border:1px solid var(--line,#ddd);box-shadow:0 8px 30px rgba(0,0,0,.2);font-size:13px');
+    const head = css(document.createElement('div'), 'display:flex;align-items:center;gap:6px');
+    const title = css(document.createElement('strong'), 'flex:1'); title.textContent = '🦊 宠物 AI';
+    const close = document.createElement('button'); close.type = 'button'; close.textContent = '×'; close.onclick = () => { box.remove(); petChatBox = null; };
+    head.append(title, close);
+    const log = css(document.createElement('div'), 'flex:1;min-height:90px;max-height:36vh;overflow:auto;display:flex;flex-direction:column;gap:6px');
+    const line = (who, text) => { const d = css(document.createElement('div'), 'padding:6px 9px;border-radius:10px;white-space:pre-wrap;word-break:break-word;max-width:92%;' + (who === 'me' ? 'align-self:flex-end;background:#7955c7;color:#fff' : 'align-self:flex-start;border:1px solid var(--line,#ddd)')); d.textContent = text; log.append(d); log.scrollTop = log.scrollHeight; return d; };
+    const modelSel = css(document.createElement('select'), 'max-width:100%'), status = css(document.createElement('div'), 'font-size:12px;opacity:.75');
+    const linkLabel = css(document.createElement('label'), 'display:flex;gap:6px;align-items:center'), link = document.createElement('input'); link.type = 'checkbox'; link.checked = prefs.petLink !== false;
+    link.onchange = () => { prefs.petLink = link.checked; save(); };
+    linkLabel.append(link, document.createTextNode('联动：让她看到主对话最近几条（仅发送给宠物 AI）'));
+    const input = css(document.createElement('input'), 'flex:1;min-width:0;padding:6px'); input.placeholder = '和她说点什么…'; input.maxLength = 500;
+    const sendBtn = document.createElement('button'); sendBtn.type = 'button'; sendBtn.textContent = '发送';
+    const toMain = css(document.createElement('button'), 'align-self:flex-start'); toMain.type = 'button'; toMain.textContent = '把她的话带到主对话'; toMain.hidden = true;
+    const row = css(document.createElement('div'), 'display:flex;gap:6px'); row.append(input, sendBtn);
+    box.append(head, log, toMain, row, linkLabel, modelSel, status); document.body.append(box);
+    const history = []; let lastReply = '';
+    const refreshInfo = async () => {
+      try {
+        const info = await petApi('/api/pet/ai');
+        modelSel.replaceChildren(Object.assign(document.createElement('option'), { value: '', textContent: '使用主 AI 的模型（当前：' + (info.models.find(m => m.ref === info.mainModel)?.label || info.mainModel || '未设置') + '）' }), ...info.models.map(m => Object.assign(document.createElement('option'), { value: m.ref, textContent: '单独使用：' + m.label + ' · ' + m.providerName })));
+        modelSel.value = info.mode === 'own' ? info.model : '';
+        const m = info.month; status.textContent = '宠物 AI 本月单独计量：' + (m.calls || 0) + ' 次 · ' + fmtNum(m.totalTokens || 0) + ' tokens' + (m.cost ? ' · 约 ' + m.currency + (Math.round(m.cost * 10000) / 10000) : '');
+      } catch (e) { status.textContent = e.message; }
+    };
+    modelSel.onchange = async () => { try { await petApi('/api/pet/ai', { method: 'PUT', body: JSON.stringify(modelSel.value ? { mode: 'own', model: modelSel.value } : { mode: 'main' }) }); await refreshInfo(); } catch (e) { status.textContent = e.message; refreshInfo(); } };
+    toMain.onclick = () => { if (lastReply) { fillStarter('宠物说：“' + lastReply + '”\n我想问：'); box.remove(); petChatBox = null; } };
+    const send = async () => {
+      const text = input.value.trim(); if (!text || sendBtn.disabled) return;
+      input.value = ''; sendBtn.disabled = true; line('me', text); const wait = line('pet', '…');
+      try {
+        const r = await petApi('/api/pet/chat', { method: 'POST', body: JSON.stringify({ message: text, history: history.slice(-8), link: link.checked, context: link.checked ? mainContext() : [] }) });
+        wait.textContent = r.reply + (r.linked ? '' : ''); history.push({ role: 'user', text }, { role: 'assistant', text: r.reply }); lastReply = r.reply; toMain.hidden = false; happy(1200); refreshInfo();
+      } catch (e) { wait.textContent = e.message; }
+      sendBtn.disabled = false; input.focus();
+    };
+    sendBtn.onclick = send; input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) send(); });
+    line('pet', '想聊什么？我是独立的宠物 AI，不会打断主对话～'); await refreshInfo(); input.focus();
+  }
   let menu = null;
   function closeMenu() { menu?.remove(); menu = null; }
   function openMenu(x, y) {
     closeMenu(); menu = document.createElement('div'); menu.id = 'ymPetMenu';
     const item = (label, fn) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.addEventListener('click', () => { closeMenu(); fn(); }); menu.append(b); };
     item('💬 打个招呼 Say hi', () => { happy(); say(pick(LINES.click)); });
+    if (!host) item('🦊 和宠物 AI 聊天 / 选模型', () => openPetChat());
     const d = dominant();
     item('心情 Mood：' + (d === 'angry' ? '😠 生气' : d === 'sad' ? '😢 难过' : mood.joy >= 60 ? '😄 很开心' : '🙂 平静') + `（开心 ${Math.round(mood.joy)} / 怒气 ${Math.round(mood.anger)} / 难过 ${Math.round(mood.sad)}）`, () => {});
     item('🍬 哄哄她 Cheer her up', () => onEvent('comfort'));

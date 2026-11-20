@@ -4,6 +4,7 @@
 #   ./install.sh --reconfigure   重新配置（会备份现有 .env；不会改动已有的加密密钥和数据库密码）
 #   ./install.sh scrub-admin     首次登录成功后，清空服务器上保存的管理员初始密码文件
 #   ./install.sh --no-start      只生成配置，不启动容器
+#   ./install.sh enable-updater  启用“网页更新”：管理员在网页上传官方签名的发布包即可更新（只需运行一次；disable-updater 关闭）
 #   ./install.sh clients <文件夹>  把客户端安装包（Yumeiro-Setup-*.exe / Yumeiro-Portable-*.exe / Yumeiro-*.apk）传进数据卷，网页的“下载客户端”引导就会出现按钮
 #   ./install.sh --clients=<文件夹>  安装完成、服务启动后顺便上传安装包（也可用环境变量 YUMEIRO_CLIENTS）
 # 非交互：设置 YUMEIRO_NONINTERACTIVE=1 并用 YUMEIRO_* 环境变量提供各项（见 README“无人值守安装”）。
@@ -17,9 +18,11 @@ for arg in "$@"; do
     --reconfigure) RECONFIGURE=1 ;;
     --no-start) NO_START=1 ;;
     scrub-admin) CMD=scrub-admin ;;
+    enable-updater) CMD=enable-updater ;;
+    disable-updater) CMD=disable-updater ;;
     clients) CMD=clients ;;
     --clients=*) CLIENTS_DIR="${arg#--clients=}" ;;
-    -h|--help) sed -n '2,8p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,9p' "$0"; exit 0 ;;
     *) if [ "$CMD" = clients ] && [ -z "$CLIENTS_DIR" ]; then CLIENTS_DIR="$arg"; else echo "未知参数：$arg" >&2; exit 2; fi ;;
   esac
 done
@@ -81,6 +84,32 @@ upload_clients() {
 if [ "$CMD" = clients ]; then
   [ -n "$CLIENTS_DIR" ] || die "用法：./install.sh clients <存放安装包的文件夹>"
   upload_clients "$CLIENTS_DIR"; exit 0
+fi
+
+# ---------- enable-updater / disable-updater ----------
+set_env_var() { # set_env_var 名称 值：已有就替换，没有就追加
+  if grep -q "^$1=" .env; then sed -i "s|^$1=.*|$1=$2|" .env; else printf '%s=%s\n' "$1" "$2" >> .env; fi
+}
+if [ "$CMD" = enable-updater ] || [ "$CMD" = disable-updater ]; then
+  [ -f .env ] || die "还没有安装（找不到 .env），请先运行 ./install.sh"
+  command -v docker >/dev/null 2>&1 && dc version >/dev/null 2>&1 || die "没有找到 docker compose"
+  cur="$(grep '^COMPOSE_FILE=' .env | head -1 | cut -d= -f2-)"; [ -n "$cur" ] || cur="docker-compose.yml"
+  if [ "$CMD" = disable-updater ]; then
+    set_env_var COMPOSE_FILE "$(printf '%s' "$cur" | tr ':' '\n' | grep -vx 'docker-compose.updater.yml' | paste -sd: -)"
+    dc up -d --remove-orphans; ok "已关闭网页更新（updater 容器已移除；secrets/updater_token 保留，重新启用时沿用）"; exit 0
+  fi
+  here="$(pwd)"; case "$here" in *[[:space:]:]*) die "安装目录路径里不能有空格或冒号：$here" ;; esac
+  say "启用网页更新会多运行一个 updater 容器，它能访问宿主机的 docker.sock（相当于宿主机 root 权限）。"
+  say "  · 它不对外开放端口，只有 yumeiro 容器能凭令牌访问；"
+  say "  · 它只接受带官方签名、且和签名清单逐个一致的发布包；"
+  say "  · 更新前会备份程序文件和数据到 ./backups/，新版本没起来会自动回滚程序文件。"
+  ask GO "确认启用？(y/N)" "n" YUMEIRO_UPDATER
+  [[ "$GO" =~ ^[Yy] ]] || { say "已取消"; exit 0; }
+  [ -s secrets/updater_token ] || { mkdir -p secrets; chmod 700 secrets; write_secret secrets/updater_token "$(random_pass 48)"; }
+  set_env_var UPDATER_PROJECT_DIR "$here"
+  case ":$cur:" in *:docker-compose.updater.yml:*) ;; *) set_env_var COMPOSE_FILE "$cur:docker-compose.updater.yml" ;; esac
+  dc up -d --build
+  ok "网页更新已启用：管理设置 → 服务更新 里上传官方发布包即可（Yumeiro-x.y.z.zip）"; exit 0
 fi
 
 # ---------- scrub-admin ----------

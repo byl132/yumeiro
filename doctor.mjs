@@ -58,15 +58,6 @@ export function buildChecks(s) {
     const drift = Math.abs(s.clock.driftMs), lvl = drift > 5 * 60000 ? 'fail' : drift > 60000 ? 'warn' : 'ok';
     add('网络', '服务器时间', lvl, `与网络时间相差约 ${(drift / 1000).toFixed(1)} 秒`, lvl === 'ok' ? '' : '时间不准会导致登录令牌、HTTPS 证书和审计时间异常。请启用时间同步（chrony / systemd-timesyncd / w32time）。');
   } else add('网络', '服务器时间', 'info', '没能取得网络时间做对比');
-  const e = s.env;
-  if (e) {
-    add('网络', '出口 IP', 'info', `${e.egress?.ip || '未知'}　${e.egress?.country || ''}　${e.egress?.isp || ''}`.trim());
-    for (const v of Object.values(e.vendors || {})) {
-      const reach = (v.probes || []).map(x => `${x.label}${x.reachable ? ' ' + x.ms + 'ms' : ' 不通'}`).join('、');
-      add('网络', `${v.name} 可达性`, v.level === 'ok' ? 'ok' : v.level === 'warn' ? 'warn' : 'fail', reach + (v.level === 'ok' ? '' : '；' + (v.reasons || []).filter(r => r.level !== 'ok').map(r => r.text).join('；')), (v.advice || []).join(' '));
-    }
-  } else add('网络', '官方模型端点可达性', 'info', '环境检测结果尚未生成，稍后再试');
-
   // ---- 内容与客户端 ----
   const dl = s.downloads || [];
   add('客户端与内容', '客户端安装包', dl.length ? 'ok' : 'info', dl.length ? '可下载：' + dl.join('、') : '下载目录里还没有安装包', dl.length ? '' : '想让成员在网页里下载客户端：bash install.sh clients <文件夹>（见《客户端安装包上传说明.md》）。');

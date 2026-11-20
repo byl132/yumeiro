@@ -11,3 +11,6 @@ brand
 *.zip
 *.exe
 *.apk
+backups
+.update-work
+docker

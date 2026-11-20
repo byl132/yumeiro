@@ -188,7 +188,7 @@ struct AdminView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Picker("", selection: $tab) { Text("成员").tag(0); Text("用量").tag(1); Text("MCP").tag(2); Text("服务").tag(3) }.pickerStyle(.segmented).padding()
+            Picker("", selection: $tab) { Text("成员").tag(0); Text("用量").tag(1); Text("MCP").tag(2) }.pickerStyle(.segmented).padding()
             if !model.isAdmin { Text("只有管理员能用这里。").foregroundStyle(.secondary).padding() }
             else {
                 List {
@@ -211,59 +211,24 @@ struct AdminView: View {
                         ForEach(model.usageRows) { r in
                             VStack(alignment: .leading) { HStack { Text(r.name).font(.headline); Spacer(); Text("\(r.monthCalls) 次") }; Text("今日 \(r.todayCalls) 次 · \(r.tokens) tokens").font(.caption).foregroundStyle(.secondary) }
                         }
-                    case 2:
+                    default:
                         Text("这里只能开关已有的 MCP 服务；添加、编辑和市场安装请在网页版管理页操作。").font(.caption).foregroundStyle(.secondary)
                         if model.mcp.isEmpty { Text("还没有配置 MCP 服务。").foregroundStyle(.secondary) }
                         ForEach(model.mcp) { m in
                             HStack { VStack(alignment: .leading) { Text(m.name).font(.headline); Text(m.command).font(.caption2).foregroundStyle(.secondary).lineLimit(2) }
                                 Spacer(); Toggle("", isOn: Binding(get: { m.enabled }, set: { v in Task { await model.toggleMcp(m.name, v) } })).labelsHidden() }
                         }
-                    default:
-                        ServiceUpdateView()
                     }
                 }
             }
         }
         .navigationTitle("管理")
-        .task(id: tab) { if model.isAdmin { switch tab { case 0: await model.loadMembers(); case 1: await model.loadUsageAll(); case 2: await model.loadMcp(); default: await model.loadServiceUpdate() } } }
+        .task(id: tab) { if model.isAdmin { switch tab { case 0: await model.loadMembers(); case 1: await model.loadUsageAll(); default: await model.loadMcp() } } }
         .sheet(isPresented: $adding) { MemberSheet(member: nil) }
         .sheet(item: $resetting) { MemberSheet(member: $0) }
         .confirmationDialog("删除成员", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), presenting: deleting) { m in
             Button("删除 \(m.email)", role: .destructive) { Task { await model.deleteMember(m.id) } }
         } message: { _ in Text("他的对话、附件等数据都会一起删除，无法恢复。") }
-    }
-}
-
-struct ServiceUpdateView: View {
-    @EnvironmentObject var model: AppModel
-
-    var body: some View {
-        let info = model.serviceUpdate
-        VStack(alignment: .leading, spacing: 12) {
-            if info.isEmpty {
-                ProgressView("正在读取服务版本…")
-            } else {
-                Text(info.bool("updateAvailable") ? "发现新版本：\(info.str("latestVersion"))" : "服务已是最新版本")
-                    .font(.headline)
-                if !info.str("currentVersion").isEmpty {
-                    Text("当前版本：\(info.str("currentVersion"))").font(.caption).foregroundStyle(.secondary)
-                }
-                if info.bool("updateAvailable") {
-                    Text(info.str("message")).font(.callout).foregroundStyle(.secondary)
-                    if let raw = info["releaseUrl"] as? String, let url = URL(string: raw), !raw.isEmpty {
-                        Link("查看发布页", destination: url)
-                    }
-                }
-                Divider()
-                Text("更新命令").font(.headline)
-                Text(info.str("nativeCommand")).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-                Text(info.str("dockerCommand")).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-                Text("更新前请先备份数据；执行后服务会重启。建议在服务器终端执行命令。")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 8)
     }
 }
 

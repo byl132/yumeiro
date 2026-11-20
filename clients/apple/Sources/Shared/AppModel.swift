@@ -34,11 +34,12 @@ final class AppModel: ObservableObject {
     @Published var selectedAgent = ""
     @Published var skills: [SkillItem] = []
     @Published var market: [MarketItem] = []
+    @Published var workspaces: [Workspace] = []
+    @Published var activeWorkspace: Workspace? = nil
     @Published var members: [Member] = []
     @Published var usageRows: [Member] = []
     @Published var usageMonth = ""
     @Published var mcp: [McpItem] = []
-    @Published var serviceUpdate: JSON = [:]
     private var mcpRaw: [JSON] = []
     @Published var themeMode: String
     @Published var fontScale: Double
@@ -75,8 +76,6 @@ final class AppModel: ObservableObject {
         return nil
     }
 
-    lazy var groupModel = GroupModel(app: self)
-    func sessionExpired() { expired() }
     private func expired() { session.clearLogin(); passwordInput = ""; loginError = "登录已过期，请重新登录"; screen = .login }
 
     // MARK: 登录 / 退出
@@ -109,13 +108,13 @@ final class AppModel: ObservableObject {
     func logout() async {
         stop()
         await api.logout()
-        groupModel.groups = []; groupModel.messages = []; groupModel.current = nil; convs = []; messages = []; pending = []; currentId = nil; title = "新对话"; me = [:]; wallImage = nil; wallGradient = nil; page = nil
+        convs = []; messages = []; pending = []; currentId = nil; title = "新对话"; me = [:]; workspaces = []; activeWorkspace = nil; wallImage = nil; wallGradient = nil; page = nil
         screen = .login
     }
 
     private func enterApp() {
         screen = .chat
-        Task { await loadConvs(); await loadModels(); await loadConfig(); await loadUsage(); await loadAgents(); await loadMemories(); await loadWallpaperPrefs() }
+        Task { await loadConvs(); await loadModels(); await loadConfig(); await loadUsage(); await loadAgents(); await loadMemories(); await loadWallpaperPrefs(); await loadWorkspaces() }
     }
 
     // MARK: 数据
@@ -406,6 +405,46 @@ final class AppModel: ObservableObject {
         } catch { return (error as? ApiError)?.message ?? error.localizedDescription }
     }
 
+    // MARK: 工作区成员
+    private func parseWorkspaceMember(_ value: Any) -> WorkspaceMember? {
+        if let email = value as? String, !email.isEmpty { return WorkspaceMember(id: email, email: email, name: email, disabled: false) }
+        guard let item = value as? JSON else { return nil }
+        let id = item.str("id").isEmpty ? item.str("userId") : item.str("id")
+        let email = item.str("email")
+        guard !id.isEmpty || !email.isEmpty else { return nil }
+        return WorkspaceMember(id: id.isEmpty ? email : id, email: email, name: item.str("displayName").isEmpty ? (item.str("name").isEmpty ? email : item.str("name")) : item.str("displayName"), disabled: item.bool("disabled"))
+    }
+
+    private func parseWorkspace(_ item: JSON) -> Workspace {
+        let rawMembers: [Any] = (item["members"] as? [Any]) ?? []
+        return Workspace(id: item.str("id"), name: item.str("name"), createdAt: (item["createdAt"] as? Double) ?? 0, mine: item.bool("mine"), owner: item.str("owner"), members: rawMembers.compactMap(parseWorkspaceMember))
+    }
+
+    func loadWorkspaces() async {
+        guard let d = await guarded(quiet: true, { try await api.call("GET", "/api/workspaces") }) else { return }
+        workspaces = d.list("workspaces").map(parseWorkspace)
+        if let current = activeWorkspace, let refreshed = workspaces.first(where: { $0.id == current.id }) { activeWorkspace = refreshed }
+        else { activeWorkspace = workspaces.first }
+    }
+
+    func searchWorkspaceMembers(_ workspaceId: String, query: String) async -> [WorkspaceMember] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let encoded = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? q
+        guard let d = await guarded({ try await api.call("GET", "/api/workspaces/\(workspaceId)/members/search?q=\(encoded)") }) else { return [] }
+        let values: [Any] = (d["members"] as? [Any]) ?? (d["users"] as? [Any]) ?? (d["results"] as? [Any]) ?? []
+        return values.compactMap(parseWorkspaceMember)
+    }
+
+    func addWorkspaceMember(_ workspaceId: String, userId: String) async -> Bool {
+        guard await guarded({ try await api.call("POST", "/api/workspaces/\(workspaceId)/members", json: ["userId": userId]) }) != nil else { return false }
+        await loadWorkspaces(); return true
+    }
+
+    func removeWorkspaceMember(_ workspaceId: String, userId: String) async -> Bool {
+        guard await guarded({ try await api.call("DELETE", "/api/workspaces/\(workspaceId)/members/\(userId)") }) != nil else { return false }
+        await loadWorkspaces(); return true
+    }
+
     // MARK: 管理（仅管理员）
     private func parseMember(_ m: JSON) -> Member {
         let month = m.obj("month")
@@ -431,10 +470,6 @@ final class AppModel: ObservableObject {
         guard let d = await guarded({ try await api.call("GET", "/api/admin/mcp") }) else { return }
         mcpRaw = d.list("servers")
         mcp = mcpRaw.map { s in McpItem(name: s.str("name"), command: (s.str("command") + " " + (((s["args"] as? [String]) ?? []).joined(separator: " "))).trimmingCharacters(in: .whitespaces), enabled: s.bool("enabled", true)) }
-    }
-    func loadServiceUpdate() async {
-        guard isAdmin else { serviceUpdate = [:]; return }
-        serviceUpdate = await guarded(quiet: true, { try await api.call("GET", "/api/admin/service-update") }) ?? [:]
     }
     func toggleMcp(_ name: String, _ enabled: Bool) async {
         var copy = mcpRaw
