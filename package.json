@@ -1,6 +1,6 @@
 {
   "name": "yumeiro-web",
-  "version": "0.45.5",
+  "version": "0.45.6",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "pg": "^8.23.1",
+    "qrcode": "^1.5.4",
     "undici": "^7.30.2",
     "unpdf": "^1.9.1"
   },

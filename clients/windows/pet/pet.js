@@ -35,6 +35,9 @@
     thanks: ['听到你这么说我好开心 That made my day']
   };
   const pick = list => list[Math.floor(Math.random() * list.length)];
+  // 番茄钟休息时给的小建议
+  const REST_TIPS = ['站起来走一走，活动一下肩颈。', '喝杯水，顺便看看窗外的远处 20 秒。', '做几次深呼吸：吸 4 秒、停 4 秒、呼 6 秒。', '转转手腕和脚踝，伸个懒腰。', '闭上眼睛休息一分钟，让眼睛放松一下。', '起身接杯水，不要一直盯着屏幕。'];
+  const restTip = () => pick(REST_TIPS);
   const defaults = () => ({ enabled: Boolean(host), size: host ? 150 : 130, walk: true, roam: 'screen' });   // roam：screen = 桌面端在整个屏幕里漫游；bottom = 只沿当前高度左右走
   const load = () => { try { return { ...defaults(), ...JSON.parse(localStorage.getItem(KEY) || '{}') }; } catch { return defaults(); } };
   let prefs = load();
@@ -568,7 +571,7 @@
   // 专注（番茄钟）的节点
   function onFocus(d) {
     if (d.phase === 'work-start') { bump('joy', 3); say('开始专注 ' + (d.minutes || 25) + ' 分钟，我陪着你～ Focus time!', 3000); }
-    else if (d.phase === 'work-end') { bump('joy', 12); emote('happy', 4000, '专注完成！🍅 今天第 ' + (d.done || 1) + ' 个，休息一下吧～'); }
+    else if (d.phase === 'work-end') { bump('joy', 12); emote('happy', 6000, '专注完成！🍅 今天第 ' + (d.done || 1) + ' 个。休息建议：' + restTip()); }
     else if (d.phase === 'rest-end') say('休息结束，要继续吗？加油～', 3200);
   }
   // 退出动画（桌面端）：主进程在退出前发来 bye：先原地告别约 1.1 秒，再朝 dir 方向走出屏幕并淡出
@@ -789,6 +792,14 @@
     const d = dominant();
     item('心情 Mood：' + (d === 'angry' ? '😠 生气' : d === 'sad' ? '😢 难过' : mood.joy >= 60 ? '😄 很开心' : '🙂 平静') + `（开心 ${Math.round(mood.joy)} / 怒气 ${Math.round(mood.anger)} / 难过 ${Math.round(mood.sad)}）`, () => {});
     item('🍬 哄哄她 Cheer her up', () => onEvent('comfort'));
+    const fc = window.YumeiroSide && window.YumeiroSide.focus;
+    if (fc) {
+      const st = fc.status(), left = Math.max(0, Math.ceil((st.endAt - Date.now()) / 1000)), mmss = String(Math.floor(left / 60)).padStart(2, '0') + ':' + String(left % 60).padStart(2, '0');
+      item(st.phase === 'work' ? '🍅 专注中 ' + mmss + '（点一下停止）' : st.phase === 'rest' ? '☕ 休息中 ' + mmss + '（点一下结束休息）' : '🍅 开始专注 ' + st.work + ' 分钟', () => {
+        if (st.phase === 'idle') { fc.start(); say('开始专注 ' + st.work + ' 分钟，我陪着你～', 3000); } else { fc.stop(); say(st.phase === 'work' ? '先停一下也没关系～' : '休息结束啦，要继续吗？', 2800); }
+      });
+      item('💡 给我一条休息建议', () => say(restTip(), 6000));
+    }
     item('🧹 忘掉聊过的事 Forget', () => forget());
     item(prefs.proactive === false ? '💬 主动找我说话：关' : '💬 主动找我说话：开', () => { prefs.proactive = prefs.proactive === false; save(); say(prefs.proactive === false ? '好～我不会主动打扰你，想我了就戳戳我' : '那我有事就来找你啦～', 2800); });
     item('🧰 侧边栏（浏览 / 待办 / 专注…）', () => openSide()());

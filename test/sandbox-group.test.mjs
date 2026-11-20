@@ -296,3 +296,71 @@ test('宠物 AI：默认跟随主 AI，可单独选模型；聊天单独计量�
   assert.equal(after.calls, before + 2); assert.ok(after.totalTokens >= 10, '宠物 AI 的 Token 单独统计');
   assert.equal((await call('/api/pet/ai', 'PUT', { mode: 'main' })).data.mode, 'main');
 });
+
+test('工作区：管理员能拿到成员下拉选项，普通成员不能；列表里每个工作区带最近的协作任务', async () => {
+  const email = 'picker@example.com', password = 'member-password-123456';
+  const created = await call('/api/admin/members', 'POST', { email, password });
+  assert.equal(created.status, 201);
+  const options = await call('/api/workspaces/member-options');
+  assert.equal(options.status, 200);
+  const picked = options.data.members.find(m => m.email === email);
+  assert.ok(picked && picked.displayName && picked.id, '成员出现在选项里');
+  assert.ok(!options.data.members.some(m => m.email === ADMIN.email), '不包含管理员自己');
+  const login = await fetch(base + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base }, body: JSON.stringify({ email, password }) });
+  const cookie = login.headers.get('set-cookie').split(';')[0];
+  assert.equal((await fetch(base + '/api/workspaces/member-options', { headers: { Cookie: cookie } })).status, 403, '普通成员看不到全部成员');
+  const ws = await call('/api/workspaces', 'POST', { name: '带任务的空间', visibility: 'members', members: [email] });
+  assert.equal(ws.status, 201);
+  const list = (await call('/api/workspaces')).data.workspaces.find(w => w.name === '带任务的空间');
+  assert.ok(Array.isArray(list.recent) && list.recent.length === 0, '新工作区还没有任务，recent 是空数组');
+  assert.deepEqual(list.members, [email]);
+});
+
+test('扫码登录：电脑生成二维码，已登录的手机确认，电脑领取登录；没有 secret 领不走；拒绝与过期都不能登录', async () => {
+  const email = 'qr@example.com', password = 'member-password-123456';
+  assert.equal((await call('/api/admin/members', 'POST', { email, password })).status, 201);
+  const post = (p, body, headers = {}) => fetch(base + p, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base, ...headers }, body: JSON.stringify(body) });
+  // 手机：成员已登录
+  const login = await post('/api/auth/login', { email, password }); const lj = await login.json(), phone = { Cookie: login.headers.get('set-cookie').split(';')[0], 'X-CSRF-Token': lj.csrfToken };
+  // 来源不是本站地址 → 拒绝
+  assert.equal((await post('/api/auth/recover/qr/start', { origin: 'https://evil.example' })).status, 400);
+  const started = await (await post('/api/auth/recover/qr/start', { origin: base })).json();
+  assert.match(started.svg, /^<svg/); assert.ok(started.url.startsWith(base + '/?qr=')); assert.ok(started.secret && started.id);
+  const code = new URL(started.url).searchParams.get('qr');
+  assert.notEqual(code, started.secret, '二维码里的 code 和只留在电脑里的 secret 不同');
+  const status = id => fetch(base + '/api/auth/recover/qr/status?id=' + id).then(r => r.json());
+  assert.equal((await status(started.id)).status, 'pending');
+  assert.equal((await post('/api/auth/recover/qr/finish', { id: started.id, secret: started.secret })).status, 409, '手机还没确认不能领取');
+  // 未登录的人不能确认；确认前能看到请求者信息
+  assert.equal((await post('/api/security/qr-approve', { code, approve: true })).status, 401);
+  const info = await fetch(base + '/api/security/qr-info?code=' + code, { headers: phone }); assert.equal(info.status, 200); assert.ok('ip' in (await info.json()));
+  assert.equal((await post('/api/security/qr-approve', { code: 'wrong', approve: true }, phone)).status, 404);
+  assert.equal((await post('/api/security/qr-approve', { code, approve: true }, phone)).status, 200);
+  assert.equal((await status(started.id)).status, 'approved');
+  assert.equal((await post('/api/auth/recover/qr/finish', { id: started.id, secret: 'x'.repeat(32) })).status, 409, 'secret 不对领不走');
+  const done = await post('/api/auth/recover/qr/finish', { id: started.id, secret: started.secret });
+  assert.equal(done.status, 200); assert.equal((await done.json()).email, email);
+  assert.equal((await post('/api/auth/recover/qr/finish', { id: started.id, secret: started.secret })).status, 409, '只能领一次');
+  // 拒绝
+  const second = await (await post('/api/auth/recover/qr/start', { origin: base })).json();
+  assert.equal((await post('/api/security/qr-approve', { code: new URL(second.url).searchParams.get('qr'), approve: false }, phone)).status, 200);
+  assert.equal((await status(second.id)).status, 'denied');
+  assert.equal((await post('/api/auth/recover/qr/finish', { id: second.id, secret: second.secret })).status, 409);
+});
+
+test('忘记密码：成员也能用手机授权（管理员重置密码也有），恢复密钥仍然只给管理员', async () => {
+  const email = 'forgot@example.com', password = 'member-password-123456';
+  assert.equal((await call('/api/admin/members', 'POST', { email, password })).status, 201);
+  const post = (p, body, headers = {}) => fetch(base + p, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base, ...headers }, body: JSON.stringify(body) });
+  const login = await post('/api/auth/login', { email, password }); const lj = await login.json(), phone = { Cookie: login.headers.get('set-cookie').split(';')[0], 'X-CSRF-Token': lj.csrfToken };
+  const started = await (await post('/api/auth/recover/phone/start', { email })).json();
+  assert.match(started.code, /^\d{6}$/);
+  assert.equal((await post('/api/security/phone-approve', { code: started.code, approve: true }, phone)).status, 200, '成员可以批准自己账号的请求');
+  const newPassword = 'a-brand-new-password-2026';
+  assert.equal((await post('/api/auth/recover/phone/finish', { id: started.id, newPassword })).status, 200);
+  assert.equal((await post('/api/auth/login', { email, password })).status, 401, '旧密码失效');
+  assert.equal((await post('/api/auth/login', { email, password: newPassword })).status, 200, '新密码可用');
+  const again = await post('/api/auth/login', { email, password: newPassword }); const aj = await again.json(), fresh = { Cookie: again.headers.get('set-cookie').split(';')[0], 'X-CSRF-Token': aj.csrfToken };
+  const key = await fetch(base + '/api/security/recovery-key', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base, ...fresh }, body: JSON.stringify({ password: newPassword }) });
+  assert.equal(key.status, 403, '成员不能生成恢复密钥');
+});

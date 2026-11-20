@@ -15,6 +15,10 @@
   .ymd-input:focus{outline:3px solid #e951642e;border-color:#df9ca4}
   .ymd-field{display:grid;gap:4px;margin-top:12px}.ymd-field label{font-size:13px;font-weight:650}.ymd-field small{font-size:12px;color:var(--muted,#777b86)}
   .ymd-field .ymd-input{margin-top:0}.ymd-row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .ymd-checks{display:grid;gap:6px;border:1px solid var(--line,#e7e8ec);border-radius:12px;padding:8px}.ymd-checks>.ymd-input{height:36px;font-size:14px}
+  .ymd-check-rows{max-height:210px;overflow:auto;display:grid;gap:2px}.ymd-check-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:9px;cursor:pointer}.ymd-check-row:hover{background:var(--accent-soft,#fff0f2)}
+  .ymd-check-row input{width:18px;height:18px;flex:none;accent-color:var(--accent,#e95164)}.ymd-check-row span{display:flex;flex-direction:column;min-width:0}.ymd-check-row small{color:var(--muted,#777b86);font-size:12px;overflow:hidden;text-overflow:ellipsis}.ymd-check-empty{padding:10px;color:var(--muted,#777b86);font-size:13px}
+  .ymd-field[hidden]{display:none}.ymd-box select option{background:var(--ym-card,#fff);color:var(--ink,#252832)}
   .ymd-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
   .ymd-actions button{min-width:84px;min-height:40px;padding:0 16px;border-radius:10px;border:1px solid var(--line,#e7e8ec);background:transparent;color:inherit;font:inherit;cursor:pointer}
   .ymd-actions button.ok{background:var(--accent,#e95164);border-color:var(--accent,#e95164);color:#fff;font-weight:650}
@@ -35,18 +39,32 @@
     const msg = document.createElement('div'); msg.className = 'ymd-msg'; msg.textContent = String(opts.message ?? '');
     if (!msg.textContent) msg.style.display = 'none';
     box.append(title, msg);
-    let input = null; const inputs = {};
+    let input = null; const inputs = {}, wraps = {}, conditional = [];
     if (opts.fields) {
       let row = null;
       for (const f of opts.fields) {
         const wrap = document.createElement('div'); wrap.className = 'ymd-field';
         const label = document.createElement('label'); label.textContent = f.label;
-        const el = document.createElement('input'); el.className = 'ymd-input'; el.type = f.type || 'text'; el.value = f.value ?? ''; el.autocomplete = 'off'; el.setAttribute('aria-label', f.label);
+        const el = document.createElement(f.type === 'select' ? 'select' : f.type === 'checklist' ? 'div' : 'input'); el.className = f.type === 'checklist' ? 'ymd-checks' : 'ymd-input';
+        if (f.type === 'checklist') {
+          // 多选列表：每行一个复选框（名称 + 小字说明），超过 6 项带搜索框；value 是选中项的数组
+          const chosen = new Set(f.value || []), rowsEl = document.createElement('div'); rowsEl.className = 'ymd-check-rows';
+          const draw = q => { rowsEl.replaceChildren(); const list = (f.options || []).filter(o => !q || (o.label + ' ' + (o.sub || '')).toLowerCase().includes(q.toLowerCase())); if (!list.length) { const e = document.createElement('div'); e.className = 'ymd-check-empty'; e.textContent = f.options?.length ? '没有匹配的成员' : (f.empty || '没有可选的成员'); rowsEl.append(e); }
+            for (const o of list) { const lab = document.createElement('label'); lab.className = 'ymd-check-row'; const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = chosen.has(o.value); cb.addEventListener('change', () => { cb.checked ? chosen.add(o.value) : chosen.delete(o.value); }); const t = document.createElement('span'); t.textContent = o.label; if (o.sub) { const sm = document.createElement('small'); sm.textContent = o.sub; t.append(sm); } lab.append(cb, t); rowsEl.append(lab); } };
+          if ((f.options || []).length > 6) { const q = document.createElement('input'); q.type = 'search'; q.className = 'ymd-input'; q.placeholder = '搜索成员'; q.style.marginTop = '0'; q.addEventListener('input', () => draw(q.value.trim())); el.append(q); }
+          el.append(rowsEl); draw('');
+          Object.defineProperty(el, 'value', { get: () => [...chosen] });
+        } else if (f.type === 'select') { for (const o of f.options || []) { const opt = document.createElement('option'); opt.value = o.value; opt.textContent = o.label; el.append(opt); } el.value = f.value ?? (f.options?.[0]?.value ?? ''); }
+        else { el.type = f.type || 'text'; el.value = f.value ?? ''; el.autocomplete = 'off'; }
+        el.setAttribute('aria-label', f.label);
         if (f.min !== undefined) el.min = f.min; if (f.max !== undefined) el.max = f.max; if (f.step !== undefined) el.step = f.step; if (f.placeholder) el.placeholder = f.placeholder; if (f.type === 'number') el.inputMode = 'numeric';
         wrap.append(label, el); if (f.hint) { const h = document.createElement('small'); h.textContent = f.hint; wrap.append(h); }
-        inputs[f.name] = el;
+        inputs[f.name] = el; wraps[f.name] = wrap; if (f.showWhen) conditional.push([f, wrap]);
         if (f.half) { if (!row) { row = document.createElement('div'); row.className = 'ymd-row2'; box.append(row); } row.append(wrap); if (row.children.length === 2) row = null; } else { row = null; box.append(wrap); }
       }
+      // 条件显示：showWhen = { name, equals }，比如“成员”只在“谁可以访问 = 指定成员”时出现
+      const sync = () => { for (const [f, wrap] of conditional) wrap.hidden = String(inputs[f.showWhen.name]?.value) !== String(f.showWhen.equals); };
+      for (const [f] of conditional) inputs[f.showWhen.name]?.addEventListener('change', sync); sync();
       input = Object.values(inputs)[0];
     }
     if (opts.input) { input = document.createElement('input'); input.className = 'ymd-input'; input.type = opts.type || 'text'; input.value = opts.value ?? ''; input.autocomplete = 'off'; if (opts.placeholder) input.placeholder = opts.placeholder; box.append(input); }
@@ -59,12 +77,12 @@
     actions.append(okBtn); box.append(actions); back.append(box); document.body.append(back);
     let done = false;
     const finish = value => { if (done) return; done = true; back.remove(); removeEventListener('keydown', onKey, true); try { previous?.focus?.(); } catch { /* 忽略 */ } resolve(value); next(); };
-    const collect = () => Object.fromEntries(Object.entries(inputs).map(([k, el]) => [k, el.value]));
+    const collect = () => Object.fromEntries(Object.entries(inputs).filter(([k]) => !wraps[k]?.hidden).map(([k, el]) => [k, el.value]));
     const accept = () => { if (opts.fields) { const bad = (opts.fields.find(f => f.required && !String(inputs[f.name].value).trim())); if (bad) { inputs[bad.name].focus(); return; } return finish(collect()); } finish(opts.input ? input.value : true); }, reject = () => finish(opts.input || opts.fields ? null : false);
     function onKey(e) {
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); opts.cancel ? reject() : accept(); }
       else if (e.key === 'Enter' && !e.isComposing && (opts.input || opts.fields || document.activeElement === okBtn || document.activeElement === document.body)) { e.preventDefault(); e.stopPropagation(); accept(); }
-      else if (e.key === 'Tab') { const f = [...box.querySelectorAll('input,button')]; const i = f.indexOf(document.activeElement); const to = e.shiftKey ? f[(i <= 0 ? f.length : i) - 1] : f[(i + 1) % f.length]; e.preventDefault(); to?.focus(); }
+      else if (e.key === 'Tab') { const f = [...box.querySelectorAll('input,select,button')]; const i = f.indexOf(document.activeElement); const to = e.shiftKey ? f[(i <= 0 ? f.length : i) - 1] : f[(i + 1) % f.length]; e.preventDefault(); to?.focus(); }
     }
     addEventListener('keydown', onKey, true);
     okBtn.addEventListener('click', accept); cancelBtn?.addEventListener('click', reject); extraBtn?.addEventListener('click', () => finish({ __extra: true }));

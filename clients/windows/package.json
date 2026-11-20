@@ -1,7 +1,7 @@
 {
   "name": "yumeiro-desktop",
   "productName": "Yumeiro",
-  "version": "0.12.5",
+  "version": "0.12.7",
   "description": "Yumeiro desktop client",
   "author": "Yumeiro",
   "main": "main.js",
@@ -16,6 +16,7 @@
   },
   "build": {
     "appId": "com.yumeiro.desktop",
+    "afterPack": "build/afterPack.js",
     "productName": "Yumeiro",
     "copyright": "Yumeiro",
     "files": [

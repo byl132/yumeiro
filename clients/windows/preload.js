@@ -6,6 +6,11 @@ contextBridge.exposeInMainWorld('yumeiroApp', {
   getServer: () => ipcRenderer.invoke('yumeiro:get-server'),
   login: form => ipcRenderer.invoke('yumeiro:login', form),
   loginDefaults: () => ipcRenderer.invoke('yumeiro:login-defaults'),
+  // 扫码登录 / 手机授权（忘记密码）：和网页登录页同一套服务器接口
+  qrStart: form => ipcRenderer.invoke('yumeiro:qr-start', form),
+  qrPoll: ticket => ipcRenderer.invoke('yumeiro:qr-poll', ticket),
+  phoneStart: form => ipcRenderer.invoke('yumeiro:phone-start', form),
+  phonePoll: ticket => ipcRenderer.invoke('yumeiro:phone-poll', ticket),
   signOut: () => ipcRenderer.invoke('yumeiro:sign-out'),
   // 客户端自己的主界面（app.html）用：服务器接口走主进程代理；聊天流式回复；嵌在右侧的服务器功能页
   api: (method, path, body) => ipcRenderer.invoke('app:api', String(method || 'GET'), String(path || ''), body),

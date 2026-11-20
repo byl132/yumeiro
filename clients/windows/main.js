@@ -127,11 +127,22 @@ ipcMain.on('pet:starter', (event, text) => {
 });
 ipcMain.on('pet:open', showMain);
 ipcMain.on('pet:forward', (event, type, text) => { if (['done', 'think', 'say', 'error', 'praise', 'scold', 'comfort', 'sense', 'slow', 'model', 'usage', 'card', 'memory', 'todos', 'focus', 'todo-done', 'todo-due', 'streak'].includes(type)) sendPet(type, text); });
+// 桌宠的番茄钟（独立计时，不依赖主界面）：专注 25 分钟 → 休息 5 分钟，并在专注结束时给一条休息建议
+const REST_TIPS = ['站起来走一走，活动一下肩颈。', '喝杯水，顺便看看窗外的远处 20 秒。', '做几次深呼吸：吸 4 秒、停 4 秒、呼 6 秒。', '转转手腕和脚踝，伸个懒腰。', '闭上眼睛休息一分钟，让眼睛放松一下。', '起身接杯水，不要一直盯着屏幕。'];
+const restTip = () => REST_TIPS[Math.floor(Math.random() * REST_TIPS.length)];
+const focus = { phase: 'idle', endAt: 0, timer: null, done: 0 };
+function focusClear() { clearTimeout(focus.timer); focus.timer = null; }
+function focusStart() { focusClear(); focus.phase = 'work'; focus.endAt = Date.now() + 25 * 60000; sendPet('say', '开始专注 25 分钟，我陪着你～'); focus.timer = setTimeout(focusWorkEnd, 25 * 60000); }
+function focusWorkEnd() { focus.done++; focus.phase = 'rest'; focus.endAt = Date.now() + 5 * 60000; sendPet('happy'); sendPet('say', '专注完成！🍅 今天第 ' + focus.done + ' 个。休息建议：' + restTip()); focus.timer = setTimeout(() => { focus.phase = 'idle'; focus.endAt = 0; sendPet('say', '休息结束啦，要继续吗？'); }, 5 * 60000); }
+function focusStop() { focusClear(); const was = focus.phase; focus.phase = 'idle'; focus.endAt = 0; sendPet('say', was === 'work' ? '先停一下也没关系～' : '休息结束啦，要继续吗？'); }
+const focusLeft = () => { const t = Math.max(0, Math.ceil((focus.endAt - Date.now()) / 1000)); return String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'); };
 ipcMain.on('pet:menu', () => {
   Menu.buildFromTemplate([
     { label: '打开 Yumeiro Open', click: showMain },
     { label: '打个招呼 Say hi', click: () => { sendPet('happy'); sendPet('say', '我在这儿陪你～ I\'m here!'); } },
     { label: '哄哄她 Cheer her up', click: () => sendPet('comfort') },
+    { label: focus.phase === 'work' ? '🍅 专注中 ' + focusLeft() + '（点一下停止）' : focus.phase === 'rest' ? '☕ 休息中 ' + focusLeft() + '（点一下结束休息）' : '🍅 开始专注 25 分钟', click: () => (focus.phase === 'idle' ? focusStart() : focusStop()) },
+    { label: '💡 给我一条休息建议', click: () => sendPet('say', restTip()) },
     { label: '忘掉聊过的事 Forget', click: () => sendPet('forget') },
     { label: '用量、心情与模型角色 Status', click: () => sendPet('card') },
     { label: '识别表情图片（用看图模型，耗额度）Sticker vision', type: 'checkbox', checked: readConfig().petSticker !== false, click: item => { patchConfig({ petSticker: item.checked }); pushPrefs(); sendPet('say', item.checked ? '你发表情包我会看的～' : '不再看你发的表情图啦'); } },
@@ -263,6 +274,48 @@ ipcMain.handle('yumeiro:login', async (event, form) => {
     }
     return { ok: false, error: (r.data && r.data.error) || '登录失败（HTTP ' + r.status + '）' };
   } finally { setTimeout(() => { loginTarget = null; }, 15000); }   // 登录成功后页面会马上加载，给它一点时间再清除临时放行目标
+});
+// 扫码登录：电脑（客户端）显示二维码，已登录的手机确认后，这里领取登录凭据；手机授权（忘记密码）同理，凭 6 位验证码
+let pendingOrigin = '';
+async function authTarget(form) {
+  const f = form || {};
+  let host = ''; try { host = new URL(normalize(String(f.server || '')) || 'x://').hostname; } catch { /* 下面报地址错误 */ }
+  loginTarget = host ? { host, ignore: Boolean(f.ignoreCert) } : null;
+  const resolved = await resolveOrigin(f.server);
+  if (resolved.error) return { error: resolved.error };
+  pendingOrigin = resolved.server; return { origin: resolved.server, ignoreCert: Boolean(f.ignoreCert) };
+}
+const enterApp = (origin, ignoreCert, email) => { patchConfig({ server: origin, ...(email ? { email } : {}), ignoreCertErrors: Boolean(ignoreCert) }); lastLoadError = null; if (win && !win.isDestroyed()) win.loadFile(path.join(__dirname, 'app.html')); };
+ipcMain.handle('yumeiro:qr-start', async (event, form) => {
+  const t = await authTarget(form); if (t.error) return { ok: false, error: t.error };
+  const r = await request('POST', t.origin + '/api/auth/recover/qr/start', { json: { origin: t.origin } });
+  if (r.status !== 201 || !r.data) return { ok: false, error: (r.data && r.data.error) || (r.status === 0 ? '连不上服务器：' + (r.error || '') : '生成二维码失败（HTTP ' + r.status + '）') };
+  return { ok: true, origin: t.origin, ignoreCert: t.ignoreCert, id: r.data.id, secret: r.data.secret, url: r.data.url, svg: r.data.svg, expiresAt: r.data.expiresAt };
+});
+ipcMain.handle('yumeiro:qr-poll', async (event, ticket) => {
+  const t = ticket || {}, origin = pendingOrigin; if (!origin || !t.id) return { status: 'unknown' };
+  const st = await request('GET', origin + '/api/auth/recover/qr/status?id=' + encodeURIComponent(t.id), undefined, 8000);
+  const status = st.data && st.data.status;
+  if (status !== 'approved') return { status: status || 'pending' };
+  const done = await request('POST', origin + '/api/auth/recover/qr/finish', { json: { id: t.id, secret: t.secret } });
+  if (done.status === 200 && done.data && done.data.authenticated) { enterApp(origin, t.ignoreCert, done.data.email); return { status: 'done' }; }
+  return { status: 'error', error: (done.data && done.data.error) || '登录失败（HTTP ' + done.status + '）' };
+});
+ipcMain.handle('yumeiro:phone-start', async (event, form) => {
+  const t = await authTarget(form); if (t.error) return { ok: false, error: t.error };
+  const email = String((form || {}).email || '').trim(); if (!email) return { ok: false, error: '请先填写账号（邮箱）' };
+  const r = await request('POST', t.origin + '/api/auth/recover/phone/start', { json: { email } });
+  if (r.status !== 201 || !r.data) return { ok: false, error: (r.data && r.data.error) || '发起失败（HTTP ' + r.status + '）' };
+  return { ok: true, origin: t.origin, ignoreCert: t.ignoreCert, email, id: r.data.id, code: r.data.code, expiresAt: r.data.expiresAt };
+});
+ipcMain.handle('yumeiro:phone-poll', async (event, ticket) => {
+  const t = ticket || {}, origin = pendingOrigin; if (!origin || !t.id) return { status: 'unknown' };
+  const st = await request('GET', origin + '/api/auth/recover/phone/status?id=' + encodeURIComponent(t.id), undefined, 8000);
+  const status = st.data && st.data.status;
+  if (status !== 'approved') return { status: status || 'pending' };
+  const done = await request('POST', origin + '/api/auth/recover/phone/finish', { json: { id: t.id } });
+  if (done.status === 200 && done.data && done.data.authenticated) { enterApp(origin, t.ignoreCert, t.email); return { status: 'done' }; }
+  return { status: 'error', error: (done.data && done.data.error) || '登录失败（HTTP ' + done.status + '）' };
 });
 ipcMain.handle('yumeiro:sign-out', () => signOut());
 

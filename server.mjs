@@ -29,7 +29,8 @@ import { normalizeTtsConfig, publicTtsConfig, defaultTtsConfig, speechEndpoint, 
 import { createZip, readZip, safeEntryName } from './ziputil.mjs';
 import { VISION_LIMITS, VISION_DIALECTS, DEFAULT_VISION_MODELS, DEFAULT_PROMPT, NO_ROUTE_MESSAGE, defaultVisionConfig, normalizeVisionConfig, publicVisionConfig, visionRoute, isVisionModel, buildVisionRequest, parseVisionResponse, dataUrl, imageParts, describedText, testPng } from './vision.mjs';
 import { REMOTE_LIMITS, OS_LABELS, newPairCode, normalizePairCode, cleanInputEvents, countEvents, isJpeg, cleanDeviceName } from './remote.mjs';
-import { RECOVERY, newRecoveryKey, normalizeRecoveryKey, passwordProblem, createLimiter, createPhoneStore } from './recover.mjs';
+import { RECOVERY, newRecoveryKey, normalizeRecoveryKey, passwordProblem, createLimiter, createPhoneStore, createQrStore } from './recover.mjs';
+import QRCode from 'qrcode';
 import { PROJECT_LIMITS, PROJECT_DIR, MANIFEST_NAME, mimeOf, renderMarkdownPage, signPreview, verifyPreview, previewHeaders, previewPath, manifestFor, planImport, localKit, cleanGuideMessages, parseGuideReply, guidePrompt } from './project.mjs';
 import { requestSetupHelper, requestUpdater, updaterConfigured } from './setup/setup-client.mjs';
 import { UPDATE_MAX_BYTES, verifySignedUpdateZip, compareVersions as compareReleaseVersions } from './updatepkg.mjs';
@@ -152,7 +153,7 @@ function refreshCindyModelsInBackground(user){
 // ---- AI 服务商：环境变量里的是“内置”服务商（模型名不带前缀，向后兼容）；管理员在网页里添加的按 slug/模型 引用 ----
 const envModels=modelConfigured?[...new Set([modelName,...(process.env.MODEL_EXTRA_NAMES||'').split(',').map(item=>item.trim())].filter(Boolean))]:[];
 const loginAttempts=new Map();
-const recoverLimiter=createLimiter({max:6,windowMs:15*60*1000}),recoverStartLimiter=createLimiter({max:8,windowMs:10*60*1000}),phoneStore=createPhoneStore();
+const recoverLimiter=createLimiter({max:6,windowMs:15*60*1000}),recoverStartLimiter=createLimiter({max:8,windowMs:10*60*1000}),phoneStore=createPhoneStore(),qrStore=createQrStore();
 const codeAttempts=new Map();
 const pendingCindyLogins=new Map();
 const pendingCindySocial=new Map();
@@ -1504,6 +1505,7 @@ const staticFiles={
   '/side.js':{name:'side.js',type:'text/javascript; charset=utf-8'},
   '/group.js':{name:'group.js',type:'text/javascript; charset=utf-8'},
   '/dialog.js':{name:'dialog.js',type:'text/javascript; charset=utf-8'},
+  '/home.js':{name:'home.js',type:'text/javascript; charset=utf-8'},
   '/side-tools.js':{name:'side-tools.js',type:'text/javascript; charset=utf-8'},
   '/recover.js':{name:'recover.js',type:'text/javascript; charset=utf-8'},
   '/pet/idle.png':{name:'pet/idle.png',type:'image/png'},
@@ -2318,6 +2320,7 @@ const server=http.createServer(async(req,res)=>{
     if(pathname.startsWith('/api/auth/recover/')){
       const route=pathname.slice('/api/auth/recover/'.length),ip=clientIp(req);
       const adminByEmail=email=>Object.values(db.users).find(item=>item.email===email&&item.passwordHash&&item.role==='admin'&&!item.disabled);
+      const loginUserByEmail=email=>Object.values(db.users).find(item=>item.email===email&&item.passwordHash&&!item.disabled); // 手机确认：管理员和成员都可以用
       const ipAllowed=()=>{const policy=currentAdminPolicy();return !(policy.adminAllowedIps.length&&!policy.adminAllowedIps.includes(ip))};
       if(route==='key'&&req.method==='POST'){
         const body=await readBody(req),email=String(body.email||'').trim().toLowerCase(),key=normalizeRecoveryKey(body.key),newPassword=String(body.newPassword||''),limitKey=ip+'|'+email;
@@ -2335,7 +2338,7 @@ const server=http.createServer(async(req,res)=>{
       if(route==='phone/start'&&req.method==='POST'){
         if(recoverStartLimiter.blocked(ip))return json(res,429,{error:'发起太频繁，请稍后再试'});
         recoverStartLimiter.fail(ip);
-        const email=String((await readBody(req)).email||'').trim().toLowerCase(),user=adminByEmail(email),started=phoneStore.start(user?user.id:null,{ip,ua:req.headers['user-agent']});
+        const email=String((await readBody(req)).email||'').trim().toLowerCase(),user=loginUserByEmail(email),started=phoneStore.start(user?user.id:null,{ip,ua:req.headers['user-agent']});
         if(user)await recordSecurityEvent('recover_phone_started',req,user.id);
         return json(res,201,started);
       }
@@ -2346,10 +2349,31 @@ const server=http.createServer(async(req,res)=>{
         if(newPassword&&passwordProblem(newPassword))return json(res,400,{error:passwordProblem(newPassword)});
         if(!ipAllowed())return json(res,403,{error:'当前网络地址不在管理员允许列表内'});
         const userId=phoneStore.consume(body.id),user=userId&&db.users[userId];
-        if(!user||user.disabled||user.role!=='admin')return json(res,409,{error:'请求已失效'});
+        if(!user||user.disabled)return json(res,409,{error:'请求已失效'});
         if(newPassword){user.passwordHash=await hashPassword(newPassword);for(const [k,v]of Object.entries(db.sessions))if(v.userId===user.id)delete db.sessions[k]}
         user.lastLoginAt=Date.now();
         try{const result=await issueAppSession(res,user);await recordSecurityEvent(newPassword?'recover_phone_password':'recover_phone_login',req,user.id);return json(res,200,result)}catch(error){return json(res,error.status||429,{error:error.message})}
+      }
+      // ---- 扫码登录：电脑登录页显示二维码，已登录的手机确认后，电脑自动登录 ----
+      if(route==='qr/start'&&req.method==='POST'){
+        if(recoverStartLimiter.blocked(ip))return json(res,429,{error:'发起太频繁，请稍后再试'});
+        recoverStartLimiter.fail(ip);
+        const body=await readBody(req);let origin='';
+        try{const u=new URL(String(body.origin||''));if(/^https?:$/.test(u.protocol)&&u.host===String(req.headers['x-forwarded-host']||req.headers.host))origin=u.origin}catch{}
+        if(!origin)return json(res,400,{error:'无法确定网站地址'});
+        try{const started=qrStore.start({ip,ua:req.headers['user-agent']}),link=origin+'/?qr='+started.code;
+          return json(res,201,{id:started.id,secret:started.secret,url:link,svg:await QRCode.toString(link,{type:'svg',margin:1,errorCorrectionLevel:'M'}),expiresAt:started.expiresAt})}
+        catch(error){return json(res,error.status||500,{error:error.message})}
+      }
+      if(route==='qr/status'&&req.method==='GET')return json(res,200,qrStore.status(url.searchParams.get('id')));
+      if(route==='qr/finish'&&req.method==='POST'){
+        const body=await readBody(req);
+        if(qrStore.status(body.id).status!=='approved')return json(res,409,{error:'手机还没有确认，或请求已过期，请重新生成二维码'});
+        const userId=qrStore.consume(body.id,body.secret),user=userId&&db.users[userId];
+        if(!user||user.disabled)return json(res,409,{error:'请求已失效'});
+        if(user.role==='admin'&&!ipAllowed())return json(res,403,{error:'当前网络地址不在管理员允许列表内'});
+        user.lastLoginAt=Date.now();
+        try{const result=await issueAppSession(res,user);await recordSecurityEvent('qr_login',req,user.id);return json(res,200,result)}catch(error){return json(res,error.status||429,{error:error.message})}
       }
       return json(res,404,{error:'未找到'});
     }
@@ -2383,7 +2407,6 @@ const server=http.createServer(async(req,res)=>{
     const isAdmin=session.user.role==='admin',adminOnly=()=>json(res,403,{error:'仅主账号可以执行此操作'});
     // ---- 账号安全（管理员）：恢复密钥管理 + 手机批准“忘记密码”请求 ----
     if(pathname==='/api/security/recovery'&&req.method==='GET'){
-      if(!isAdmin)return adminOnly();
       return json(res,200,{hasKey:Boolean(session.user.recovery?.hash),createdAt:session.user.recovery?.createdAt||null,pending:phoneStore.pendingFor(session.user.id),minPassword:RECOVERY.minPasswordLength,localPassword:Boolean(session.user.passwordHash)});
     }
     if(pathname==='/api/security/recovery-key'&&(req.method==='POST'||req.method==='DELETE')){
@@ -2399,11 +2422,21 @@ const server=http.createServer(async(req,res)=>{
       return json(res,200,{key:fresh.display,createdAt:session.user.recovery.createdAt});
     }
     if(pathname==='/api/security/phone-approve'&&req.method==='POST'){
-      if(!isAdmin)return adminOnly();
       const body=await readBody(req),approve=body.approve!==false,decided=phoneStore.decide(session.user.id,body.code,approve);
       if(!decided)return json(res,404,{error:'没有找到这个验证码对应的请求（可能已过期，或不是这个账号发起的）'});
       await recordSecurityEvent(approve?'recover_phone_approved':'recover_phone_denied',req,session.user.id,{from:decided.ip});
       return json(res,200,{ok:true,status:decided.status,ip:decided.ip,ua:decided.ua});
+    }
+    // 手机端扫码确认：先看是谁在请求，再批准 / 拒绝（登录的是请求登录的那台电脑，所以要认真确认）
+    if(pathname==='/api/security/qr-info'&&req.method==='GET'){
+      const info=qrStore.info(url.searchParams.get('code'));
+      return info?json(res,200,info):json(res,404,{error:'二维码已过期或无效，请在电脑上重新生成'});
+    }
+    if(pathname==='/api/security/qr-approve'&&req.method==='POST'){
+      const body=await readBody(req),approve=body.approve!==false,decided=qrStore.decide(session.user.id,body.code,approve);
+      if(!decided)return json(res,404,{error:'二维码已过期或无效，请在电脑上重新生成'});
+      await recordSecurityEvent(approve?'qr_approved':'qr_denied',req,session.user.id,{from:decided.ip});
+      return json(res,200,{ok:true,status:decided.status});
     }
     if(pathname==='/api/admin/service-update'&&req.method==='GET'){
       if(!isAdmin)return adminOnly();
@@ -2736,7 +2769,12 @@ const server=http.createServer(async(req,res)=>{
     }
 
     // 工作区：一组成员共享的项目目录（文件在运行器里）+ 多智能体协作记录
-    if(pathname==='/api/workspaces'&&req.method==='GET')return json(res,200,{runner:runnerEnabled,workspaces:Object.values(db.workspaces).filter(item=>workspaceFor(item.id,session.user)).sort((a,b)=>b.createdAt-a.createdAt).map(item=>safeWorkspace(item,session.user))});
+    if(pathname==='/api/workspaces'&&req.method==='GET')return json(res,200,{runner:runnerEnabled,workspaces:Object.values(db.workspaces).filter(item=>workspaceFor(item.id,session.user)).sort((a,b)=>b.createdAt-a.createdAt).map(item=>({...safeWorkspace(item,session.user),recent:Object.values(db.runs).filter(run=>run.workspaceId===item.id).sort((x,y)=>y.createdAt-x.createdAt).slice(0,4).map(runSummary)}))});
+    // 管理员新建 / 管理工作区时用下拉列表选成员（只有主账号能看到全部成员；普通成员仍用邮箱搜索邀请）
+    if(pathname==='/api/workspaces/member-options'&&req.method==='GET'){
+      if(session.user.role!=='admin')return json(res,403,{error:'只有主账号可以查看全部成员'});
+      return json(res,200,{members:Object.values(db.users).filter(user=>user.passwordHash&&!user.disabled&&user.id!==session.user.id).sort((x,y)=>(x.displayName||x.email).localeCompare(y.displayName||y.email,'zh')).map(user=>({id:user.id,email:user.email,displayName:user.displayName||user.email}))});
+    }
     if(pathname==='/api/workspaces'&&req.method==='POST'){
       if(Object.values(db.workspaces).filter(item=>item.ownerId===session.user.id).length>=20)return json(res,400,{error:'工作区数量已达上限（20）'});
       const body=await readBody(req),name=String(body.name||'').trim().slice(0,60),visibility=['private','members','team','public'].includes(body.visibility)?body.visibility:'private';

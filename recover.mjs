@@ -1,5 +1,5 @@
 // 管理员“忘记密码”：恢复密钥 + 手机确认。纯逻辑，便于测试。
-import { randomBytes, randomInt } from 'node:crypto';
+import { randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 去掉容易看错的 I O 0 1
 export const RECOVERY = { keyChars: 25, phoneTtlMs: 5 * 60 * 1000, maxPhoneAttempts: 8, minPasswordLength: 16 };
@@ -63,5 +63,28 @@ export function createPhoneStore({ now = () => Date.now() } = {}) {
       byId.delete(r.id); return r.userId;
     },
     size: () => byId.size
+  };
+}
+
+// 扫码登录：电脑登录页生成二维码 → 已登录的手机扫码并确认 → 电脑拿到一次性凭据登录。
+// code 在二维码里（手机用它确认）；secret 只留在电脑的页面里（领取登录时必须带上），所以只扫到二维码的人领不走登录。
+export const QR = { ttlMs: 3 * 60 * 1000 };
+export function createQrStore({ now = () => Date.now() } = {}) {
+  const byId = new Map();
+  const sweep = () => { for (const [id, r] of byId) if (r.expires < now() - 60000) byId.delete(id); };
+  const same = (a, b) => { const x = Buffer.from(String(a || '')), y = Buffer.from(String(b || '')); return x.length === y.length && x.length > 0 && timingSafeEqual(x, y); };
+  const live = r => r && r.expires > now();
+  return {
+    start(meta = {}) {
+      sweep();
+      if ([...byId.values()].filter(live).length > 300) throw Object.assign(new Error('请求太多，请稍后再试'), { status: 429 });
+      const r = { id: randomBytes(18).toString('base64url'), code: randomBytes(16).toString('base64url'), secret: randomBytes(24).toString('base64url'), status: 'pending', userId: null, createdAt: now(), expires: now() + QR.ttlMs, ip: meta.ip || '', ua: String(meta.ua || '').slice(0, 160) };
+      byId.set(r.id, r); return { id: r.id, code: r.code, secret: r.secret, expiresAt: r.expires };
+    },
+    status(id) { const r = byId.get(String(id || '')); if (!r) return { status: 'unknown' }; if (r.status === 'pending' && !live(r)) r.status = 'expired'; return { status: r.status, expiresAt: r.expires }; },
+    // 手机端确认前看一眼：是谁在请求（IP / 浏览器），防止被人拿着二维码骗你确认
+    info(code) { const r = [...byId.values()].find(item => same(item.code, code) && item.status === 'pending' && live(item)); return r ? { ip: r.ip, ua: r.ua, createdAt: r.createdAt, expiresAt: r.expires } : null; },
+    decide(userId, code, approve) { sweep(); if (!userId) return null; const r = [...byId.values()].find(item => same(item.code, code) && item.status === 'pending' && live(item)); if (!r) return null; r.status = approve ? 'approved' : 'denied'; r.userId = approve ? userId : null; r.approvedAt = now(); return { status: r.status, ip: r.ip, ua: r.ua }; },
+    consume(id, secret) { const r = byId.get(String(id || '')); if (!r || r.status !== 'approved' || now() - r.approvedAt > QR.ttlMs || !same(r.secret, secret)) return null; byId.delete(r.id); return r.userId; }
   };
 }

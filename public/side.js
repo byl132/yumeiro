@@ -620,5 +620,11 @@
   setInterval(phaseTick, 1000); setInterval(checkReminders, 5000);
   setInterval(announceTodos, 30 * 60000); setInterval(syncNow, 5 * 60000);
   window.addEventListener('focus', () => { if (document.getElementById('sideButton')) syncNow(); });
-  window.YumeiroSide = { open: tab => { if (tab && views[tab]) { state.tab = tab; save(); } setOpen(true); }, close: () => setOpen(false), toggle: () => setOpen(!state.open), sync: syncNow };
+  window.YumeiroSide = { open: tab => { if (tab && views[tab]) { state.tab = tab; save(); } setOpen(true); }, close: () => setOpen(false), toggle: () => setOpen(!state.open), sync: syncNow,
+    // 桌宠用：开始 / 停止番茄钟、读取状态（界面仍然在侧边栏的“专注”里）
+    focus: {
+      status: () => { const f = state.focus; return { phase: f.phase, endAt: f.endAt, work: f.work, rest: f.rest, done: f.done }; },
+      start: () => { const f = state.focus; if (f.phase === 'idle') { f.todo = f.todo || ''; f.review = null; f.phase = 'work'; f.endAt = now() + f.work * 60000; save(); emit('yumeiro:focus', { phase: 'work-start', minutes: f.work, title: '' }); if (state.open && state.tab === 'focus') render(); } },
+      stop: () => { const f = state.focus; if (f.phase !== 'idle') { f.phase = 'idle'; f.endAt = 0; save(); if (state.open && state.tab === 'focus') render(); } }
+    } };
 })();

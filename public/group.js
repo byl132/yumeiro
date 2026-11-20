@@ -159,7 +159,7 @@
       const label = el('input', { placeholder: '名称', maxLength: 30, value: m?.label || '', style: 'width:100px' }), model = modelSelect(m?.model), agent = agentSelect(m?.agentId);
       const role = el('input', { placeholder: '身份，如“后端工程师”', maxLength: 200, value: m?.role || '', style: 'flex:1;min-width:130px' });
       const strengths = el('input', { placeholder: '擅长，如“写代码、排错”（产品经理据此分工）', maxLength: 200, value: m?.strengths || '', style: 'flex:2;min-width:180px' });
-      const row = el('div', { className: 'gedit-row' }, label, model, agent, role, strengths, el('button', { type: 'button', className: 'secondary', textContent: '移除', on: { click: () => row.remove() } }));
+      const row = el('div', { className: 'gedit-row gedit-member' }, label, model, agent, role, strengths, el('button', { type: 'button', className: 'secondary', textContent: '移除', on: { click: () => row.remove() } }));
       model.addEventListener('change', () => { // 换模型时，身份/擅长还是空的就按新模型填默认值
         const info = models.find(x => x.ref === model.value); if (!info) return;
         const h = hintFor(info.model + ' ' + (info.label || ''));
@@ -189,7 +189,7 @@
     const mode = el('select', {}, Object.entries(MODES).map(([v, t]) => el('option', { value: v, textContent: t }))); mode.value = group?.mode || 'pm';
     const rounds = el('input', { type: 'number', min: 1, max: 6, value: group?.rounds || (mode.value === 'pm' ? 4 : 2), style: 'width:70px' });
     const pmLabel = el('input', { maxLength: 30, value: group?.pm?.label || '产品经理', style: 'width:110px' }), pmModel = modelSelect(group?.pm?.model), pmAgent = agentSelect(group?.pm?.agentId);
-    const pmBox = el('div', { className: 'gedit-row', style: 'align-items:center;border-style:dashed' }, el('strong', { textContent: '产品经理' }), pmLabel, pmModel, pmAgent, el('span', { style: 'font-size:12px;color:var(--muted)', textContent: '建议选最强的推理模型' }));
+    const pmBox = el('div', { className: 'gedit-row gedit-pm', style: 'border-style:dashed' }, el('strong', { textContent: '产品经理' }), pmLabel, pmModel, pmAgent, el('span', { style: 'font-size:12px;color:var(--muted)', textContent: '建议选最强的推理模型' }));
     const syncMode = () => { pmBox.hidden = mode.value !== 'pm'; };
     mode.addEventListener('change', syncMode); syncMode();
     const err = el('div', { style: 'color:#d33;font-size:13px' });
