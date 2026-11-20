@@ -104,3 +104,17 @@ html[data-theme=dark] body.settings-page .team-nav button.on{background:rgba(233
   body[data-page="app"] input,body[data-page="app"] textarea,body[data-page="app"] select{font-size:16px}
 }
 @media(max-width:380px){body[data-page="app"] .welcome h1{font-size:20px}body[data-page="app"] .suggestions{gap:6px}}
+
+/* ---- 手机版顶栏：工具按钮很多（工具箱 / 文档 / 下载 / 宠物 / 调色 / 记忆…），改成两行——第一行菜单 + 标题，第二行按钮可横向滑动，不再把菜单挤出屏幕 ---- */
+@media(max-width:760px){
+  body[data-page="app"] .topbar{height:auto;min-height:46px;flex-wrap:wrap;align-items:center;padding:6px 10px 4px;row-gap:4px}
+  body[data-page="app"] .top-left{order:1;flex:1 1 100%;min-width:0}
+  body[data-page="app"] .top-left .crumb{flex:1;min-width:0}
+  body[data-page="app"] .top-right{order:2;flex:1 0 100%;flex-wrap:nowrap;justify-content:flex-start;overflow-x:auto;gap:8px;padding:2px 0 4px;scrollbar-width:none;-webkit-overflow-scrolling:touch;-webkit-mask-image:linear-gradient(90deg,#000 90%,transparent);mask-image:linear-gradient(90deg,#000 90%,transparent)}
+  body[data-page="app"] .top-right::-webkit-scrollbar{display:none}
+  body[data-page="app"] .top-right>*{flex:0 0 auto}
+  body[data-page="app"] .top-right .icon-button{width:38px;height:38px}
+  body[data-page="app"] .welcome .spark{width:84px!important;height:84px!important;margin-bottom:10px}
+  body[data-page="app"] .composer textarea{height:52px;min-height:44px;background:transparent!important;padding:4px 2px 6px}
+  body[data-page="app"] .composer-bottom .icon-button,body[data-page="app"] .composer-bottom button:not(.send){width:40px;height:40px}
+}
