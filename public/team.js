@@ -516,7 +516,7 @@
     const act = async (a, kind) => { report.textContent = kind === 'sync' ? '正在同步…' : '正在测试（会向官方网关发一次 1 token 的请求）…'; try { const r = await api(`/api/cindy/accounts/${a.id}/${kind}`, { method: 'POST', body: JSON.stringify({}) }); report.textContent = kind === 'sync' ? (r.ok ? `同步成功：${r.models} 个对话模型` : '同步失败：' + (r.syncError || '未知原因')) : r.steps.map(x => (x.ok ? '✓ ' : '✗ ') + x.name + '：' + x.detail).join('\n'); loadModels(); } catch (e) { report.textContent = e.message; } };
     const sharePanel = () => {
       if (!sharing) return null;
-      const box = el('div', { class: 'team-form', style: 'border:1px solid var(--line,#8884);border-radius:10px;padding:12px;margin:8px 0' });
+      const box = el('div', { style: 'display:flex;flex-direction:column;align-items:flex-start;gap:8px;border:1px solid var(--line,#8884);border-radius:12px;padding:14px;margin:8px 0' });
       const msg = el('div', { class: 'team-err' });
       if (sharing.allowed) {
         box.append(el('strong', { textContent: '团队共享 Cindy 账号：已开启' }), el('p', { class: 'team-note', textContent: sharing.byEnv ? '由服务器环境变量 CINDY_ALLOW_SHARED_ACCOUNTS=1 开启。' : `已由 ${sharing.ack?.email || '主账号'} 于 ${sharing.ack?.at ? fmt(sharing.ack.at) : ''} 确认：已阅读 Cindy 用户协议并自行承担后果。` }));
@@ -524,7 +524,7 @@
         return box;
       }
       const secs = sharing.minSeconds || 120;
-      const check = el('input', { type: 'checkbox', disabled: true }), go = el('button', { type: 'button', textContent: '开启团队共享', disabled: true });
+      const check = el('input', { type: 'checkbox', disabled: true }), go = el('button', { type: 'button', class: 'primary', textContent: '开启团队共享', disabled: true });
       const status = el('div', { class: 'team-note', textContent: '' });
       let started = false, left = secs, timer = null;
       const sync = () => { check.disabled = !(started && left <= 0); if (check.disabled) check.checked = false; go.disabled = check.disabled || !check.checked; };
@@ -2052,7 +2052,7 @@
     const load = async () => {
       try {
         const d = await api('/api/admin/service-update/status');
-        if (!d.available) { upBtn.disabled = true; show('这台服务器不能在网页里更新（' + d.reason + '）。Docker 部署：在安装目录运行 ./install.sh enable-updater 启用一次更新器即可；原生安装：旧版本的更新助手不认识这个功能，第一次需要在新版本目录里运行 sudo bash deploy/yumeiro-native.sh update。'); return; }
+        if (!d.available) { upBtn.disabled = true; upBtn.hidden = true; file.hidden = true; show('这台服务器不能在网页里更新（' + d.reason + '）。Docker 部署：在安装目录运行 ./install.sh enable-updater 启用一次更新器即可；原生安装：旧版本的更新助手不认识这个功能，第一次需要在新版本目录里运行 sudo bash deploy/yumeiro-native.sh update。'); return; }
         if (d.status.state === 'running') return watch(d.status.from, d.status.version);
         upBtn.disabled = false; renderPending(d.pending, d.currentVersion);
         if (d.status.state === 'failed') { show('上一次更新失败，已回滚。日志如下：'); logBox.textContent = d.status.log || ''; logBox.hidden = false; }
