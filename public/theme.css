@@ -73,3 +73,34 @@ html[data-theme=dark] body.settings-page .team-nav button.on{background:rgba(233
 @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
   html[data-theme=dark] body.settings-page .team-pagehead,html[data-theme=dark] body.settings-page .team-nav,html[data-theme=dark] body.settings-page .team-main{background:rgba(16,18,27,.94)}
 }
+
+/* ---- 手机版聊天首页（窄屏）：更紧凑、点击区域更大；输入区分两行（选项一行横向滑动，输入和发送一行）---- */
+@media(max-width:760px){
+  body[data-page="app"] .sidebar{width:min(84vw,300px)}
+  body[data-page="app"] .topbar{height:52px;padding:0 10px;gap:6px}
+  body[data-page="app"] .crumb{font-size:13px}
+  body[data-page="app"] .icon-button{width:36px;height:36px}
+  body[data-page="app"] .content{padding:12px 14px 6px}
+  body[data-page="app"] .welcome{padding:8px 0}
+  body[data-page="app"] .spark{width:40px;height:40px;border-radius:13px;margin-bottom:12px}
+  body[data-page="app"] .welcome h1{font-size:22px}
+  body[data-page="app"] .welcome p{margin:6px 0 16px;font-size:13px}
+  body[data-page="app"] .suggestions{grid-template-columns:1fr 1fr;gap:8px}
+  body[data-page="app"] .suggestion{flex-direction:column;align-items:flex-start;gap:6px;padding:10px;min-height:68px}
+  body[data-page="app"] .suggestion strong{font-size:13px}
+  body[data-page="app"] .suggestion small{display:none}
+  body[data-page="app"] .messages{gap:12px}
+  body[data-page="app"] .mavatar{display:none}
+  body[data-page="app"] .bubble{max-width:94%;font-size:15px;padding:10px 12px;line-height:1.65}
+  body[data-page="app"] .composer-wrap{padding:6px 10px calc(8px + env(safe-area-inset-bottom,0px))}
+  body[data-page="app"] .composer{padding:8px 10px;border-radius:14px}
+  body[data-page="app"] .composer textarea{font-size:16px;min-height:40px;max-height:120px}
+  body[data-page="app"] .composer-bottom{flex-wrap:wrap;gap:6px;align-items:center}
+  body[data-page="app"] .composer-picks{order:-1;flex:1 0 100%;flex-wrap:nowrap;overflow-x:auto;padding-bottom:2px;scrollbar-width:none}
+  body[data-page="app"] .composer-picks::-webkit-scrollbar{display:none}
+  body[data-page="app"] .composer-picks select{max-width:none;flex:0 0 auto;min-width:96px;height:32px}
+  body[data-page="app"] .composer-bottom .send{margin-left:auto;width:40px;height:40px}
+  body[data-page="app"] .footnote{display:none}
+  body[data-page="app"] input,body[data-page="app"] textarea,body[data-page="app"] select{font-size:16px}
+}
+@media(max-width:380px){body[data-page="app"] .welcome h1{font-size:20px}body[data-page="app"] .suggestions{gap:6px}}

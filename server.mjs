@@ -1835,7 +1835,7 @@ const INVITE_PAGE=/^\/invite\/[A-Za-z0-9_-]{16,80}$/;
 // 邀请记录放在 db.settings.invites（随 settings 一起加密存储）；令牌原文保存，方便管理员随时复制链接。
 const inviteState=invite=>invite.revokedAt?'revoked':invite.expiresAt<=Date.now()?'expired':invite.uses>=invite.maxUses?'used':'active';
 const findInvite=token=>Object.values(db.settings.invites||{}).find(item=>{const a=Buffer.from(item.token),b=Buffer.from(String(token));return a.length===b.length&&timingSafeEqual(a,b)});
-const safeInvite=invite=>({id:invite.id,token:invite.token,note:invite.note||'',email:invite.email||'',maxUses:invite.maxUses,uses:invite.uses,expiresAt:invite.expiresAt,createdAt:invite.createdAt,state:inviteState(invite),dailyLimit:invite.limits.dailyLimit||0,monthlyCallLimit:invite.limits.monthlyCallLimit||0,monthlyTokenLimit:invite.limits.monthlyTokenLimit||0});
+const safeInvite=invite=>({id:invite.id,token:invite.token,note:invite.note||'',email:invite.email||'',maxUses:invite.maxUses,uses:invite.uses,expiresAt:invite.expiresAt,createdAt:invite.createdAt,state:inviteState(invite),dailyLimit:invite.limits.dailyLimit||0,monthlyCallLimit:invite.limits.monthlyCallLimit||0,monthlyTokenLimit:invite.limits.monthlyTokenLimit||0,hourlyTokenLimit:invite.limits.hourlyTokenLimit||0});
 
 // 公开预览入口：靠链接里的签名放行（只读、12 小时过期、可撤销），页面在沙箱里运行
 async function handlePreview(req,res,pathname){

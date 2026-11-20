@@ -1678,16 +1678,17 @@
 
   // ---- 账号安全（管理员）：恢复密钥 + 手机批准“忘记密码”----
   async function renderSecurity(body) {
+    if (!document.getElementById('secStyle')) { const st = document.createElement('style'); st.id = 'secStyle'; st.textContent = '.sec-card{border:1px solid var(--line);border-radius:14px;padding:16px;margin:12px 0;display:grid;gap:10px}.sec-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.sec-head h4{margin:0;font-size:16px}.sec-badge{font-size:12px;padding:2px 9px;border-radius:99px;border:1px solid currentColor}.sec-badge.ok{color:#2f9e6b}.sec-badge.off{color:#d98e04}.sec-card p{margin:0}.sec-card input{width:100%;box-sizing:border-box;height:42px;border:1px solid var(--line);border-radius:10px;padding:0 12px;background:transparent;color:var(--ink);min-width:0}.sec-card input.code{text-align:center;font-size:24px;letter-spacing:6px;height:54px}.sec-actions{display:flex;gap:8px;flex-wrap:wrap}.sec-actions>*{flex:1 1 140px;min-height:42px}.sec-card details{font-size:13px;opacity:.85}.sec-card summary{cursor:pointer;padding:2px 0}.sec-card details p{margin-top:6px;line-height:1.6}.sec-tip{font-size:12px;opacity:.75;border-left:3px solid var(--line);padding:2px 0 2px 10px;margin:14px 0 4px;line-height:1.6}@media(max-width:640px){.sec-card{padding:14px;border-radius:12px}.sec-actions>*{flex:1 1 100%}.sec-card input.code{font-size:22px;letter-spacing:5px}}'; document.head.append(st); }
     const err = errBox(), info = el('div', { class: 'team-note' });
     const params = new URLSearchParams(location.search);
     const state = await api('/api/security/recovery');
     // 恢复密钥
-    const statusLine = el('p', { class: 'team-note' });
-    const paintStatus = s => { statusLine.textContent = s.hasKey ? '已设置（' + new Date(s.createdAt).toLocaleString() + '）。恢复密钥只在生成时显示一次，请离线保存。' : '还没有设置恢复密钥。设置后，忘记密码时可以在登录页用它重置密码并登录。'; };
+    const statusLine = el('p', { class: 'team-note' }), badge = el('span', { class: 'sec-badge off', textContent: '未设置' });
+    const paintStatus = s => { badge.className = 'sec-badge ' + (s.hasKey ? 'ok' : 'off'); badge.textContent = s.hasKey ? '已设置' : '未设置'; statusLine.textContent = s.hasKey ? '已设置（' + new Date(s.createdAt).toLocaleString() + '）。恢复密钥只在生成时显示一次，请离线保存。' : '还没有设置恢复密钥。设置后，忘记密码时可以在登录页用它重置密码并登录。'; };
     paintStatus(state);
-    const keyPw = el('input', { type: 'password', autocomplete: 'current-password', placeholder: '输入当前密码以确认', style: 'max-width:260px' });
+    const keyPw = el('input', { type: 'password', autocomplete: 'current-password', placeholder: '输入当前密码以确认' });
     const keyOut = el('div');
-    const makeKey = el('button', { type: 'button', class: 'secondary', textContent: state.hasKey ? '重新生成恢复密钥（旧的立即作废）' : '生成恢复密钥', on: { click: async () => {
+    const makeKey = el('button', { type: 'button', class: 'primary', textContent: state.hasKey ? '重新生成恢复密钥（旧的立即作废）' : '生成恢复密钥', on: { click: async () => {
       err.textContent = '';
       try {
         const r = await api('/api/security/recovery-key', { method: 'POST', body: JSON.stringify({ password: keyPw.value }) }); keyPw.value = '';
@@ -1707,7 +1708,7 @@
       try { await api('/api/security/recovery-key', { method: 'DELETE', body: JSON.stringify({ password: keyPw.value }) }); keyPw.value = ''; paintStatus({ hasKey: false }); keyOut.replaceChildren(); makeKey.textContent = '生成恢复密钥'; err.textContent = ''; } catch (e) { err.textContent = e.message; }
     } } });
     // 手机批准
-    const code = el('input', { inputMode: 'numeric', maxLength: 7, placeholder: '6 位验证码', value: params.get('code') || '', style: 'max-width:160px;font-size:20px;letter-spacing:3px;text-align:center' });
+    const code = el('input', { class: 'code', inputMode: 'numeric', maxLength: 7, placeholder: '6 位验证码', value: params.get('code') || '' });
     const decide = async (value, approve) => {
       err.textContent = '';
       try { const r = await api('/api/security/phone-approve', { method: 'POST', body: JSON.stringify({ code: value, approve }) }); info.textContent = approve ? '✅ 已批准：发起请求的电脑（' + (r.ip || '未知地址') + '）会自动继续。' : '已拒绝这次请求。'; code.value = ''; refresh(); } catch (e) { err.textContent = e.message; }
@@ -1721,15 +1722,25 @@
       } catch { /* 下一轮再试 */ }
     }
     const poll = setInterval(refresh, 3000); refresh();
+    // 版式：两张卡片（恢复密钥 / 手机确认），输入框占满一行，按钮另起一行；窄屏下按钮纵向铺满
     body.append(
-      el('h4', { textContent: '🔑 恢复密钥（Recovery key）' }), statusLine,
-      el('div', { class: 'team-form' }, keyPw, makeKey, state.hasKey ? delKey : null), keyOut,
-      el('p', { class: 'team-note', textContent: '忘记密码时：在登录页点“管理员忘记密码？”，输入管理员邮箱和恢复密钥，再设置新密码。用过一次后这把密钥立即作废，系统会给你一把新的。多次输错会被临时锁定。' }),
-      el('h4', { textContent: '📱 手机确认（Phone approval）' }),
-      el('p', { class: 'team-note', textContent: '电脑上点“管理员忘记密码 → 手机确认”会得到一个 6 位验证码。用一直保持管理员登录的手机（浏览器、已安装的 PWA 或安卓客户端）打开本页，输入验证码并批准，电脑就能直接登录，还可以顺便改密码。建议现在就在手机上登录一次，并保持登录。' }),
-      el('div', { class: 'team-form' }, code, el('button', { type: 'button', class: 'secondary', textContent: '批准', on: { click: () => decide(code.value, true) } }), el('button', { type: 'button', class: 'secondary', textContent: '拒绝', on: { click: () => decide(code.value, false) } })),
-      el('h4', { textContent: '待批准的请求' }), pendingBox, info, err,
-      el('p', { class: 'team-note', textContent: '安全提示：批准前请确认这是你本人刚刚发起的（看来源地址和时间）；验证码 5 分钟内有效，只能由对应的管理员账号批准；所有操作都会记入审计。新密码至少 ' + state.minPassword + ' 个字符。' }));
+      el('p', { class: 'team-note', textContent: '忘记密码时有两种办法登录并改密码：恢复密钥，或用一直登录着的手机确认。' }),
+      el('div', { class: 'sec-card' },
+        el('div', { class: 'sec-head' }, el('h4', { textContent: '🔑 恢复密钥' }), badge),
+        statusLine,
+        keyPw,
+        el('div', { class: 'sec-actions' }, makeKey, state.hasKey ? delKey : null),
+        keyOut,
+        el('details', {}, el('summary', { textContent: '忘记密码时怎么用' }), el('p', { textContent: '在登录页点“管理员忘记密码？”，输入管理员邮箱和恢复密钥，再设置新密码。用过一次后这把密钥立即作废，系统会给你一把新的。多次输错会被临时锁定。' }))),
+      el('div', { class: 'sec-card' },
+        el('div', { class: 'sec-head' }, el('h4', { textContent: '📱 手机确认' })),
+        el('p', { class: 'team-note', textContent: '电脑上点“管理员忘记密码 → 手机确认”会得到 6 位验证码，在一直保持管理员登录的手机上输入并批准，电脑就能直接登录。建议现在就在手机上登录一次并保持登录。' }),
+        code,
+        el('div', { class: 'sec-actions' }, el('button', { type: 'button', class: 'primary', textContent: '批准', on: { click: () => decide(code.value, true) } }), el('button', { type: 'button', class: 'secondary', textContent: '拒绝', on: { click: () => decide(code.value, false) } })),
+        el('h4', { textContent: '待批准的请求', style: 'margin:6px 0 0;font-size:14px' }), pendingBox, info,
+        el('details', {}, el('summary', { textContent: '用的是哪种手机？' }), el('p', { textContent: '浏览器、已安装的 PWA 或安卓客户端都可以，只要保持管理员登录；验证码 5 分钟内有效。' }))),
+      err,
+      el('div', { class: 'sec-tip', textContent: '批准前请确认这是你本人刚刚发起的（看来源地址和时间）；只能由对应的管理员账号批准；所有操作都会记入审计。新密码至少 ' + state.minPassword + ' 个字符。' }));
   }
 
   async function renderVoice(body) {
@@ -2091,15 +2102,15 @@
   async function renderInvites(body) {
     const { invites } = await api('/api/admin/invites');
     const err = errBox();
-    const f = { note: el('input', { placeholder: '备注，例如“市场部小王”（可选）' }), email: el('input', { type: 'email', placeholder: '限定邮箱（可选；留空则对方自己填）' }), days: el('input', { type: 'number', min: 1, max: 90, value: 7, title: '有效天数' }), uses: el('input', { type: 'number', min: 1, max: 100, value: 1, title: '可用次数' }), limit: el('input', { type: 'number', min: 0, placeholder: '每日调用上限（0=不限）' }), mcalls: el('input', { type: 'number', min: 0, placeholder: '每月调用上限（0=不限）' }), mtokens: el('input', { type: 'number', min: 0, placeholder: '每月 Token 上限（0=不限）' }) };
+    const f = { note: el('input', { placeholder: '备注，例如“市场部小王”（可选）' }), email: el('input', { type: 'email', placeholder: '限定邮箱（可选；留空则对方自己填）' }), days: el('input', { type: 'number', min: 1, max: 90, value: 7, title: '有效天数' }), uses: el('input', { type: 'number', min: 1, max: 100, value: 1, title: '可用次数' }), limit: el('input', { type: 'number', min: 0, placeholder: '每日调用上限（0=不限）' }), mcalls: el('input', { type: 'number', min: 0, placeholder: '每月调用上限（0=不限）' }), mtokens: el('input', { type: 'number', min: 0, placeholder: '每月 Token 上限（0=不限）' }), htokens: el('input', { type: 'number', min: 0, placeholder: '每小时 Token 上限（0=不限）' }) };
     body.append(
       el('p', { class: 'team-note', textContent: '生成邀请链接发给同事，对方打开后自己设置邮箱和密码即可加入，账号默认是成员。链接可随时在这里复制或删除；删除后立即失效。' }),
       el('div', { class: 'team-form' }, f.note, f.email,
         el('label', { class: 'team-note', textContent: '有效天数' }, f.days), el('label', { class: 'team-note', textContent: '可用次数' }, f.uses),
-        f.limit, f.mcalls, f.mtokens,
+        f.limit, f.mcalls, f.mtokens, f.htokens,
         el('button', { type: 'button', class: 'secondary wide', textContent: '生成邀请链接', on: { click: async () => {
           try {
-            const { invite } = await api('/api/admin/invites', { method: 'POST', body: JSON.stringify({ note: f.note.value, email: f.email.value, expiresInDays: Number(f.days.value || 7), maxUses: Number(f.uses.value || 1), dailyLimit: Number(f.limit.value || 0), monthlyCallLimit: Number(f.mcalls.value || 0), monthlyTokenLimit: Number(f.mtokens.value || 0) }) });
+            const { invite } = await api('/api/admin/invites', { method: 'POST', body: JSON.stringify({ note: f.note.value, email: f.email.value, expiresInDays: Number(f.days.value || 7), maxUses: Number(f.uses.value || 1), dailyLimit: Number(f.limit.value || 0), monthlyCallLimit: Number(f.mcalls.value || 0), monthlyTokenLimit: Number(f.mtokens.value || 0), hourlyTokenLimit: Number(f.htokens.value || 0) }) });
             await copyText(location.origin + '/invite/' + invite.token); render();
           } catch (e) { err.textContent = e.message; }
         } } })), err,
@@ -2109,7 +2120,7 @@
         const hint = el('span', { class: 'team-note' });
         return el('div', { class: 'team-row', style: 'align-items:flex-start;flex-wrap:wrap' },
           el('div', { class: 'grow' }, (i.note || '未备注') + '　' + inviteStates[i.state],
-            el('small', { textContent: '已用 ' + i.uses + '/' + i.maxUses + '　到期 ' + fmt(i.expiresAt) + (i.email ? '　限 ' + i.email : '') + '　额度 ' + (i.dailyLimit || '∞') + '/日、' + (i.monthlyCallLimit || '∞') + '/月、' + (i.monthlyTokenLimit || '∞') + ' tokens' }),
+            el('small', { textContent: '已用 ' + i.uses + '/' + i.maxUses + '　到期 ' + fmt(i.expiresAt) + (i.email ? '　限 ' + i.email : '') + '　额度 ' + (i.dailyLimit || '∞') + '/日、' + (i.monthlyCallLimit || '∞') + '/月、' + (i.monthlyTokenLimit || '∞') + ' tokens、' + (i.hourlyTokenLimit || '∞') + ' tokens/小时' }),
             i.state === 'active' ? el('input', { value: link, readOnly: true, style: 'width:100%;margin-top:6px;border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:transparent;color:var(--ink);font-size:12px', on: { focus: e => e.target.select() } }) : null),
           el('div', { style: 'display:flex;gap:6px;align-items:center' }, hint,
             i.state === 'active' ? el('button', { type: 'button', class: 'secondary', textContent: '复制链接', on: { click: async () => { hint.textContent = (await copyText(link)) ? '已复制' : '请手动选中链接复制'; } } }) : null,
