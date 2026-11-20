@@ -28,6 +28,7 @@
       "app.css",
       "app-cindy.css",
       "app.js",
+      "dialog.js",
       "error.html",
       "package.json",
       "build/icon.png",

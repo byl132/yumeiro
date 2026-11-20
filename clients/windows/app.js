@@ -170,7 +170,7 @@
       row.addEventListener('click', () => openConv(c.id)); row.append(r1, d); box.append(row);
     }
   }
-  async function removeConv(id) { if (!confirm('删除这段对话？')) return; try { await api('DELETE', '/api/conversations/' + id); if (current === id) newChat(); await loadConvs(); } catch (x) { toast(x.message); } }
+  async function removeConv(id) { if (!await ymConfirm('删除这段对话？', { danger: true })) return; try { await api('DELETE', '/api/conversations/' + id); if (current === id) newChat(); await loadConvs(); } catch (x) { toast(x.message); } }
   async function renameConv() { if (!current) return; const name = await askText('重命名对话', $('ctitle').textContent); if (!name) return; try { await api('PATCH', '/api/conversations/' + current, { title: name }); $('ctitle').textContent = name; const c = convs.find(x => x.id === current); if (c) c.title = name; renderConvs(); } catch (x) { toast(x.message); } }
   function copyConv() { const text = messages.map(m => (m.role === 'user' ? '## 我\n' : '## Yumeiro\n') + (m.content || '')).join('\n\n'); navigator.clipboard.writeText(text).then(() => toast('已复制整段对话'), () => toast('复制失败')); }
   async function loadConvs() { const d = await api('GET', '/api/conversations'); convs = d.conversations || []; renderConvs(); }
@@ -743,7 +743,7 @@
       const chat = h('button', 'ghost-btn', '开始对话'), edit = h('button', 'ghost-btn', '编辑'), del = h('button', 'ghost-btn danger-btn', '删除'); chat.type = edit.type = del.type = 'button';
       chat.onclick = () => { $('targetKind').value = 'agent'; rebuildTargetOptions(); $('modelSelect').value = a.id; chatTarget.ref = a.id; emitModel(); newChat(); show('chat'); };
       edit.onclick = async () => { try { if (await agentDialog(a)) { await reloadAgents(); renderAgents(); toast('已保存'); } } catch (x) { toast(x.message); } };
-      del.onclick = async () => { if (!confirm('删除智能体「' + a.name + '」？')) return; try { await api('DELETE', '/api/agents/' + a.id); await reloadAgents(); renderAgents(); } catch (x) { toast(x.message); } };
+      del.onclick = async () => { if (!await ymConfirm('删除智能体「' + a.name + '」？', { danger: true })) return; try { await api('DELETE', '/api/agents/' + a.id); await reloadAgents(); renderAgents(); } catch (x) { toast(x.message); } };
       const tags = h('div', 'tags'); if (a.shared) tags.append(h('span', 'tag', '共享')); if (a.model) tags.append(h('span', 'tag', a.model)); if ((a.skillIds || []).length) tags.append(h('span', 'tag', a.skillIds.length + ' 个技能'));
       const foot = h('div', 'foot', h('span', '', a.mine ? '我创建的' : '他人共享'), h('span', '', ''));
       const btns = h('div', 'page-actions'); btns.style.margin = '8px 0 0'; btns.append(chat); if (a.mine || me?.role === 'admin') btns.append(edit, del);

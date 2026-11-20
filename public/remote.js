@@ -43,8 +43,8 @@
       return el('div', { class: 'card' }, el('div', { class: 'row' },
         el('div', { class: 'grow' }, el('div', {}, el('span', { class: 'dot' + (d.online ? ' on' : '') }), osIcon(d.os) + ' ', el('b', { textContent: d.name })), el('div', { class: 'muted', textContent: (d.osLabel || '') + (d.hostname ? ' · ' + d.hostname : '') + ' · ' + (d.online ? '在线' : '离线（最后在线 ' + ago(d.lastSeen) + '）') + (d.online && d.allowControl && !d.agentControl ? ' · 被控端是仅查看模式' : '') })),
         el('button', { type: 'button', class: 'primary', textContent: '打开', disabled: !d.online, on: { click: () => showViewer(d) } }), toggle,
-        el('button', { type: 'button', textContent: '改名', on: { click: async () => { const name = prompt('设备名称', d.name); if (!name) return; try { await api('/api/remote/devices/' + d.id, { method: 'PATCH', body: JSON.stringify({ name }) }); refresh(); } catch (e) { err.textContent = e.message; } } } }),
-        el('button', { type: 'button', textContent: '删除', on: { click: async () => { if (!confirm('删除“' + d.name + '”？删除后被控端会自动退出，需要重新配对才能再用。')) return; try { await api('/api/remote/devices/' + d.id, { method: 'DELETE' }); refresh(); } catch (e) { err.textContent = e.message; } } } })));
+        el('button', { type: 'button', textContent: '改名', on: { click: async () => { const name = await ymPrompt('设备名称', d.name); if (!name) return; try { await api('/api/remote/devices/' + d.id, { method: 'PATCH', body: JSON.stringify({ name }) }); refresh(); } catch (e) { err.textContent = e.message; } } } }),
+        el('button', { type: 'button', textContent: '删除', on: { click: async () => { if (!await ymConfirm('删除“' + d.name + '”？删除后被控端会自动退出，需要重新配对才能再用。', { danger: true, okText: '确定' })) return; try { await api('/api/remote/devices/' + d.id, { method: 'DELETE' }); refresh(); } catch (e) { err.textContent = e.message; } } } })));
     }
     await refresh(); listTimer = setInterval(refresh, 4000);
   }
@@ -127,9 +127,9 @@
     async function sendClipboard() {
       if (!canControl()) return;
       let text = '';
-      try { text = await navigator.clipboard.readText(); } catch { text = prompt('把要输入到电脑上的文字粘贴到这里：') || ''; }
+      try { text = await navigator.clipboard.readText(); } catch { text = await ymPrompt('把要输入到电脑上的文字粘贴到这里：') || ''; }
       text = text.replace(/\r\n?/g, '\n').slice(0, 6000); if (!text) return;
-      if (!confirm('把 ' + text.length + ' 个字输入到电脑上当前的光标位置？')) return;
+      if (!await ymConfirm('把 ' + text.length + ' 个字输入到电脑上当前的光标位置？')) return;
       const chunks = text.match(/[\s\S]{1,180}/g) || [];
       for (let i = 0; i < chunks.length; i += 20) { v.pending.push(...chunks.slice(i, i + 20).map(t => ({ type: 'text', text: t }))); await flush(); await sleep(120); }
       say('已输入 ' + text.length + ' 个字');

@@ -256,3 +256,18 @@ test('壁纸：Windows 客户端和安卓版按服务器的 0–80 百分数处�
   assert.doesNotMatch(vm, /\/seed\/wallpapers/);
   assert.match(vm, /\/api\/wallpapers\/pref/);
 });
+
+test('页面弹窗：前端脚本不再使用浏览器自带的 alert / confirm / prompt，统一走 dialog.js', async () => {
+  const { readdir, readFile } = await import('node:fs/promises');
+  const dir = new URL('../public/', import.meta.url);
+  const offenders = [];
+  for (const name of await readdir(dir)) {
+    if (!/\.(js|html)$/.test(name) || name === 'dialog.js' || name === 'sw.js') continue;
+    const text = await readFile(new URL(name, dir), 'utf8');
+    if (/(^|[^.\w$])(alert|confirm|prompt)\(/m.test(text.replace(/'[^'\n]*'|"[^"\n]*"|`[^`]*`/g, "''"))) offenders.push(name);
+  }
+  assert.deepEqual(offenders, [], '这些文件还在用浏览器自带弹窗：' + offenders.join('、'));
+  const dialog = await readFile(new URL('dialog.js', dir), 'utf8');
+  for (const fn of ['ymConfirm', 'ymPrompt', 'ymAlert']) assert.match(dialog, new RegExp('window\.' + fn));
+  assert.match(await readFile(new URL('index.html', dir), 'utf8'), /<script src="\/dialog\.js"><\/script>/);
+});

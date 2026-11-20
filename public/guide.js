@@ -71,7 +71,7 @@
         const r = await api('/api/guide/save', { method: 'POST', body: JSON.stringify({ files, ...(select.value ? { workspaceId: select.value } : { newWorkspaceName: name.value }) }) });
         const link = (label, href) => el('a', { href, textContent: label });
         result.replaceChildren(el('span', { textContent: '✅ 已保存到“' + r.name + '”（同名旧文件已自动备份）' }),
-          r.hasIndex ? el('button', { type: 'button', textContent: '🌐 在线预览', on: { click: async () => { try { const p = await api(`/api/workspaces/${r.workspaceId}/preview-link`, { method: 'POST', body: '{}' }); window.open(p.url, '_blank', 'noopener'); } catch (e) { alert(e.message); } } } }) : null,
+          r.hasIndex ? el('button', { type: 'button', textContent: '🌐 在线预览', on: { click: async () => { try { const p = await api(`/api/workspaces/${r.workspaceId}/preview-link`, { method: 'POST', body: '{}' }); window.open(p.url, '_blank', 'noopener'); } catch (e) { ymAlert(e.message); } } } }) : null,
           link('📦 下载 zip', `/api/workspaces/${r.workspaceId}/export`), link('💻 本地使用包', `/api/workspaces/${r.workspaceId}/export?local=1`), link('📁 打开工作区', '/workspaces'));
       } catch (e) { result.replaceChildren(el('span', { style: 'color:#d33', textContent: e.message })); }
       save.disabled = false;
@@ -114,7 +114,7 @@
     sendBtn = el('button', { type: 'submit', textContent: '发送' });
     inputEl.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); ask(inputEl.value); } });
     const form = el('form', { on: { submit: e => { e.preventDefault(); ask(inputEl.value); } } }, inputEl, sendBtn);
-    const clear = el('button', { type: 'button', textContent: '清空', title: '清空当前模式的对话', on: { click: () => { if (state[mode].length && !confirm('清空当前对话？')) return; state[mode] = []; store(mode); render(); } } });
+    const clear = el('button', { type: 'button', textContent: '清空', title: '清空当前模式的对话', on: { click: async () => { if (state[mode].length && !await ymConfirm('清空当前对话？')) return; state[mode] = []; store(mode); render(); } } });
     drawer = el('aside', { class: 'ym-guide', hidden: true, role: 'dialog', 'aria-label': 'AI 指引' },
       el('header', {}, tabHelp, tabTask, el('span', { class: 'grow' }), clear, el('button', { type: 'button', textContent: '✕', 'aria-label': '关闭', on: { click: () => { drawer.hidden = true; } } })),
       listEl, el('div', { class: 'gnote', textContent: 'AI 的建议可能有误；涉及密钥只在对应设置页填写，不要发给我。' }), form);

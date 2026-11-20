@@ -168,7 +168,7 @@
     const anchor = document.getElementById('memoryButton') || document.getElementById('settings');
     if (!anchor) return false;
     if (document.getElementById('historyButton')) return true;
-    anchor.before(el('button', { class: 'icon-button', id: 'historyButton', type: 'button', title: '历史记录树', 'aria-label': '历史记录树', textContent: '🌸', on: { click: async () => { try { open(await api('/api/history/tree')); } catch (e) { alert(e.message); } } } }));
+    anchor.before(el('button', { class: 'icon-button', id: 'historyButton', type: 'button', title: '历史记录树', 'aria-label': '历史记录树', textContent: '🌸', on: { click: async () => { try { open(await api('/api/history/tree')); } catch (e) { ymAlert(e.message); } } } }));
     return true;
   }
   let tries = 0;

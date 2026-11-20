@@ -552,8 +552,8 @@
       el('p', { class: 'team-note', textContent: '绑定后，Cindy 官方账号的授权令牌会加密保存在服务器，仅属于你的本站账号；每个本站账号最多绑定 5 个，同一个 Cindy 账号只能绑定到一个本站账号。绑定不会改变你的本站登录方式。' }),
       accounts.length ? accounts.map(a => el('div', { class: 'team-row' },
         el('div', { class: 'grow' }, a.displayName + (a.orgName ? ' · ' + a.orgName : ''), el('small', { textContent: `${regionName(a.region)}　${a.email || '无邮箱'}　绑定于 ${fmt(a.boundAt)}　授权：${a.needsRebind ? '需要重新绑定' : '正常（访问令牌约 1 小时有效，到期前自动续期）'}　Cindy 模型 ${a.models}${a.shared ? '（已共享给全部成员）' : ''}${a.syncError ? '（同步失败：' + a.syncError + '）' : ''}` }), (() => { const box = el('div', { class: 'bal-card' }); cards.set(a.id, box); return box; })()),
-        el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' }, el('button', { type: 'button', class: 'secondary', textContent: '刷新余额', on: { click: () => showBilling(a) } }), el('a', { class: 'secondary', href: subscribeUrl(a), target: '_blank', rel: 'noopener noreferrer', textContent: '订阅（官方）', style: 'display:inline-flex;align-items:center;text-decoration:none;color:inherit' }), me.role === 'admin' && sharing && sharing.allowed ? el('button', { type: 'button', class: 'secondary', textContent: a.shared ? '取消共享' : '共享给成员', on: { click: async () => { if (!a.shared && !confirm('共享后，所有团队成员都能用这个 Cindy 账号的模型，调用会扣这个账号自己的余额（成员各自的每日/每月额度仍然生效）。\n\n请确认 Cindy 的服务条款允许把账号额度提供给他人使用。继续共享？')) return; try { await api('/api/cindy/accounts/' + a.id, { method: 'PATCH', body: JSON.stringify({ shared: !a.shared }) }); render(); loadModels(); } catch (e) { report.textContent = e.message; } } } }) : null,
-          el('button', { type: 'button', class: 'secondary', textContent: '同步模型', on: { click: () => act(a, 'sync') } }), el('button', { type: 'button', class: 'secondary', textContent: '测试', on: { click: () => act(a, 'test') } }), el('button', { type: 'button', class: 'secondary', textContent: '解绑', on: { click: async () => { if (!confirm('解绑后服务器会删除这个账号的授权令牌，继续？')) return; await api('/api/cindy/accounts/' + a.id, { method: 'DELETE' }); render(); } } })))) : el('p', { class: 'team-note', textContent: '还没有绑定 Cindy 账号。' }),
+        el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' }, el('button', { type: 'button', class: 'secondary', textContent: '刷新余额', on: { click: () => showBilling(a) } }), el('a', { class: 'secondary', href: subscribeUrl(a), target: '_blank', rel: 'noopener noreferrer', textContent: '订阅（官方）', style: 'display:inline-flex;align-items:center;text-decoration:none;color:inherit' }), me.role === 'admin' && sharing && sharing.allowed ? el('button', { type: 'button', class: 'secondary', textContent: a.shared ? '取消共享' : '共享给成员', on: { click: async () => { if (!a.shared && !await ymConfirm('共享后，所有团队成员都能用这个 Cindy 账号的模型，调用会扣这个账号自己的余额（成员各自的每日/每月额度仍然生效）。\n\n请确认 Cindy 的服务条款允许把账号额度提供给他人使用。继续共享？')) return; try { await api('/api/cindy/accounts/' + a.id, { method: 'PATCH', body: JSON.stringify({ shared: !a.shared }) }); render(); loadModels(); } catch (e) { report.textContent = e.message; } } } }) : null,
+          el('button', { type: 'button', class: 'secondary', textContent: '同步模型', on: { click: () => act(a, 'sync') } }), el('button', { type: 'button', class: 'secondary', textContent: '测试', on: { click: () => act(a, 'test') } }), el('button', { type: 'button', class: 'secondary', textContent: '解绑', on: { click: async () => { if (!await ymConfirm('解绑后服务器会删除这个账号的授权令牌，继续？', { danger: true, okText: '确定' })) return; await api('/api/cindy/accounts/' + a.id, { method: 'DELETE' }); render(); } } })))) : el('p', { class: 'team-note', textContent: '还没有绑定 Cindy 账号。' }),
       report, holder);
     for (const a of accounts) if (!a.needsRebind) loadBalance(cards.get(a.id), a.id, false); else cards.get(a.id).textContent = '授权失效，请解绑后重新绑定';
     if (window.mountCindyBind) window.mountCindyBind(holder, () => render());
@@ -578,7 +578,7 @@
     const showApiMemory = async () => {
       const d = await api('/api/api-memory'), bySession = new Map();
       for (const m of d.memories) { if (!bySession.has(m.session)) bySession.set(m.session, []); bySession.get(m.session).push(m); }
-      const del = async (path, ask) => { if (ask && !confirm(ask)) return; await api(path, { method: 'DELETE' }); showApiMemory(); };
+      const del = async (path, ask) => { if (ask && !await ymConfirm(ask)) return; await api(path, { method: 'DELETE' }); showApiMemory(); };
       apiMemBox.replaceChildren(el('h3', { textContent: '接口记忆（按会话）' }),
         el('p', { class: 'team-note' }, '调用 ', el('code', { textContent: '/v1/chat/completions' }), ' 或 ', el('code', { textContent: '/v1/messages' }), ' 时带上会话标识（请求头 ', el('code', { textContent: 'X-Session-Id' }), '，或 body 里的 ', el('code', { textContent: 'session' }), ' / OpenAI 的 ', el('code', { textContent: 'user' }), ' / Anthropic 的 ', el('code', { textContent: 'metadata.user_id' }), '），服务器就会按会话记住偏好和背景并在下次带上；不带会话标识则保持无状态。每个会话只用自己的记忆，不会带上你的个人记忆。响应头 ', el('code', { textContent: 'X-Memory-Used' }), ' 表示这次带上了几条。'),
         d.memories.length ? el('button', { type: 'button', class: 'secondary', textContent: '清空全部', on: { click: () => del('/api/api-memory', '清空所有接口会话的记忆？') } }) : el('p', { class: 'team-note', textContent: d.enabled ? '还没有接口记忆。' : '记忆总开关已关闭（聊天页右上角 🧠）。' }),
@@ -593,7 +593,7 @@
       el('div', { class: 'team-form' }, name, el('button', { type: 'button', class: 'secondary', textContent: '创建令牌', on: { click: async () => {
         try { const r = await api('/api/tokens', { method: 'POST', body: JSON.stringify({ name: name.value }) }); const fresh = flatBox(); body.replaceChildren(fresh); await renderTokens(fresh, r.token); } catch (e) { err.textContent = e.message; }
       } } })), err,
-      tokens.length ? tokens.map(t => el('div', { class: 'team-row' }, el('div', { class: 'grow' }, t.name, el('small', { textContent: `${t.prefix}…　创建 ${fmt(t.createdAt)}　最近使用 ${fmt(t.lastUsedAt)}` })), el('button', { type: 'button', class: 'secondary', textContent: '删除', on: { click: async () => { if (!confirm('删除后使用该令牌的程序将立即失效，继续？')) return; await api('/api/tokens/' + t.id, { method: 'DELETE' }); render(); } } }))) : el('p', { class: 'team-note', textContent: '还没有令牌。' }),
+      tokens.length ? tokens.map(t => el('div', { class: 'team-row' }, el('div', { class: 'grow' }, t.name, el('small', { textContent: `${t.prefix}…　创建 ${fmt(t.createdAt)}　最近使用 ${fmt(t.lastUsedAt)}` })), el('button', { type: 'button', class: 'secondary', textContent: '删除', on: { click: async () => { if (!await ymConfirm('删除后使用该令牌的程序将立即失效，继续？', { danger: true, okText: '确定' })) return; await api('/api/tokens/' + t.id, { method: 'DELETE' }); render(); } } }))) : el('p', { class: 'team-note', textContent: '还没有令牌。' }),
       apiMemBox,
       connectBox,
       el('h3', { textContent: '调用示例' }),
@@ -620,7 +620,7 @@
           try { await api('/api/agents', { method: 'POST', body: JSON.stringify({ name: f.name.value, model: agentPick.ref, description: f.description.value, systemPrompt: f.prompt.value, shared: f.shared.checked, skillIds: skillBoxes.filter(x => x.box.checked).map(x => x.sk.id) }) }); render(); } catch (e) { err.textContent = e.message; }
         } } })), err,
       agentsCache.map(a => el('div', { class: 'team-row' }, el('div', { class: 'grow' }, el('span', { class: 'mk-name', title: '点击查看说明', textContent: a.name, on: { click: () => showContent(a.name, '', a.systemPrompt || '（提示词仅创建者和管理员可见）', null, { description: a.description }) } }), (a.shared ? '（共享）' : ''), el('small', { textContent: `ID ${a.id}${a.skillIds && a.skillIds.length ? '　技能 ' + a.skillIds.length + ' 个' : ''}${a.model ? '　模型 ' + (modelLabelOf(a.model)) : ''}${a.description ? '　' + a.description : ''}` })),
-        (a.mine || me.role === 'admin') && el('button', { type: 'button', class: 'secondary', textContent: '删除', on: { click: async () => { if (!confirm('删除智能体“' + a.name + '”？')) return; await api('/api/agents/' + a.id, { method: 'DELETE' }); render(); } } }))));
+        (a.mine || me.role === 'admin') && el('button', { type: 'button', class: 'secondary', textContent: '删除', on: { click: async () => { if (!await ymConfirm('删除智能体“' + a.name + '”？', { danger: true, okText: '确定' })) return; await api('/api/agents/' + a.id, { method: 'DELETE' }); render(); } } }))));
   }
 
   // AI 接入：选模板 → 填密钥 → 拉取/填写模型 → 保存。密钥只在保存时提交，之后只显示掩码。
@@ -680,7 +680,7 @@
         el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' },
           el('button', { type: 'button', class: 'secondary', textContent: '编辑', on: { click: () => { body.replaceChildren(); renderProviders(body, p); } } }),
           el('button', { type: 'button', class: 'secondary', textContent: p.enabled ? '停用' : '启用', on: { click: async () => { await api('/api/admin/providers/' + p.id, { method: 'PATCH', body: JSON.stringify({ enabled: !p.enabled }) }); render(); } } }),
-          el('button', { type: 'button', class: 'secondary', textContent: '删除', on: { click: async () => { if (!confirm('删除服务商“' + p.name + '”？使用它模型的智能体会改用默认模型。')) return; await api('/api/admin/providers/' + p.id, { method: 'DELETE' }); render(); } } })))),
+          el('button', { type: 'button', class: 'secondary', textContent: '删除', on: { click: async () => { if (!await ymConfirm('删除服务商“' + p.name + '”？使用它模型的智能体会改用默认模型。', { danger: true, okText: '确定' })) return; await api('/api/admin/providers/' + p.id, { method: 'DELETE' }); render(); } } })))),
       el('h3', { textContent: editing ? '编辑：' + editing.name : '添加服务商' }),
       el('div', { class: 'team-form' }, f.template, f.name, f.slug, f.baseUrl, f.apiKey, f.models,
         el('label', { class: 'wide' }, f.members, ' 团队成员可以使用（取消勾选则只有主账号能用）'),
@@ -724,7 +724,7 @@
         el('div', { class: 'grow' }, w.name, el('small', { textContent: `${visibilityName(w.visibility)}　创建者 ${w.owner || '—'}　成员 ${w.members.length ? w.members.join('、') : '无'}` })),
         el('div', { style: 'display:flex;gap:6px' },
           el('button', { type: 'button', class: 'secondary', textContent: '打开', on: { click: () => { body.replaceChildren(); renderWorkspace(body, w, data.runner); } } }),
-          (w.canManage ?? (w.mine || me.role === 'admin')) ? el('button', { type: 'button', class: 'secondary', textContent: '删除', on: { click: async () => { if (!confirm('删除工作区“' + w.name + '”？目录里的文件和协作记录都会被删除。')) return; await api('/api/workspaces/' + w.id, { method: 'DELETE' }); render(); } } }) : null))) : el('p', { class: 'team-note', textContent: '还没有工作区。' }));
+          (w.canManage ?? (w.mine || me.role === 'admin')) ? el('button', { type: 'button', class: 'secondary', textContent: '删除', on: { click: async () => { if (!await ymConfirm('删除工作区“' + w.name + '”？目录里的文件和协作记录都会被删除。', { danger: true, okText: '确定' })) return; await api('/api/workspaces/' + w.id, { method: 'DELETE' }); render(); } } }) : null))) : el('p', { class: 'team-note', textContent: '还没有工作区。' }));
   }
 
   // 文件管理：版本历史与还原、过期文件清理（人工确认后才删除，删除前一律先备份）
@@ -742,7 +742,7 @@
           const { versions } = await api(`${base}/versions?path=${encodeURIComponent(f.path)}`);
           const list = el('div', {}, versions.map(v => el('div', { class: 'team-row' }, el('span', { class: 'grow', textContent: fmt(v.at) + '　' + size(v.size) }),
             el('button', { type: 'button', class: 'secondary', textContent: '预览', on: { click: async () => { const r = await api(`${base}/versions?path=${encodeURIComponent(f.path)}&id=${encodeURIComponent(v.id)}`); viewer.hidden = false; viewer.textContent = r.type === 'binary' ? '（二进制文件，不显示）' : r.content + (r.truncated ? '\n…（已截断）' : ''); } } }),
-            el('button', { type: 'button', class: 'secondary', textContent: '还原到此版本', on: { click: async () => { if (!confirm(`把 ${f.path} 还原到 ${fmt(v.at)} 的版本？当前内容会先备份。`)) return; try { await api(base + '/restore', { method: 'POST', body: JSON.stringify({ path: f.path, id: v.id }) }); err.textContent = ''; note.textContent = '已还原 ' + f.path; showHistory(); } catch (e) { err.textContent = e.message; } } } }))));
+            el('button', { type: 'button', class: 'secondary', textContent: '还原到此版本', on: { click: async () => { if (!await ymConfirm(`把 ${f.path} 还原到 ${fmt(v.at)} 的版本？当前内容会先备份。`, { danger: true, okText: '确定' })) return; try { await api(base + '/restore', { method: 'POST', body: JSON.stringify({ path: f.path, id: v.id }) }); err.textContent = ''; note.textContent = '已还原 ' + f.path; showHistory(); } catch (e) { err.textContent = e.message; } } } }))));
           box.replaceChildren(el('button', { type: 'button', class: 'secondary', textContent: '← 返回', on: { click: showHistory } }), el('p', { class: 'team-note', textContent: f.path }), list, viewer);
         } } }))) : [el('p', { class: 'team-note', textContent: '还没有历史版本。保存、删除文件或智能体运行前后都会自动备份。' })];
       box.replaceChildren(el('div', { class: 'team-note', textContent: '每个文件最多保留 30 个版本；删除文件不会删除它的备份。' }), ...rows);
@@ -760,13 +760,13 @@
       const approve = el('button', { type: 'button', class: 'secondary', textContent: '确认删除选中的文件', on: { click: async () => {
         const items = d.candidates.filter(c => picks.get(c.path)).map(c => ({ path: c.path, mtime: c.mtime }));
         if (!items.length) { err.textContent = '没有选择文件'; return; }
-        if (!confirm(`确认删除 ${items.length} 个过期文件？\n删除前会先备份，之后可在“版本历史”里还原。`)) return;
+        if (!await ymConfirm(`确认删除 ${items.length} 个过期文件？\n删除前会先备份，之后可在“版本历史”里还原。`, { danger: true, okText: '确定' })) return;
         try { const r = await api(base + '/expiry/approve', { method: 'POST', body: JSON.stringify({ confirm: true, items }) }); err.textContent = ''; note.textContent = `已删除 ${r.deleted.length} 个，跳过 ${r.skipped.length} 个${r.skipped.length ? '（' + r.skipped.map(s => s.path + '：' + s.reason).join('；') + '）' : ''}`; showExpiry(); } catch (e) { err.textContent = e.message; }
       } } });
       const save = el('button', { type: 'button', class: 'secondary', textContent: '保存规则', on: { click: async () => {
         try {
           const body2 = { days: Number(days.value) || 0, protect: protect.value, autoDelete: auto.checked };
-          if (auto.checked && !d.policy.autoDelete) { if (!confirm('开启后，系统每天会自动删除超过 ' + body2.days + ' 天未修改的文件（保护路径除外）。\n每个文件删除前都会先备份，可以还原。\n单次超过 200 个文件会暂停自动删除，改为等你手动确认。\n\n确认开启自动删除？')) return; body2.confirm = true; }
+          if (auto.checked && !d.policy.autoDelete) { if (!await ymConfirm('开启后，系统每天会自动删除超过 ' + body2.days + ' 天未修改的文件（保护路径除外）。\n每个文件删除前都会先备份，可以还原。\n单次超过 200 个文件会暂停自动删除，改为等你手动确认。\n\n确认开启自动删除？', { danger: true, okText: '确定' })) return; body2.confirm = true; }
           await api(base + '/expiry', { method: 'PUT', body: JSON.stringify(body2) }); err.textContent = ''; note.textContent = '规则已保存'; showExpiry();
         } catch (e) { err.textContent = e.message; }
       } } });
@@ -854,7 +854,7 @@
           if (r.type === 'dir') {
             current = rel; viewer.hidden = true; crumb.textContent = '/' + rel;
             list.replaceChildren(...(rel ? [el('div', { class: 'team-row' }, el('a', { href: '#', textContent: '‥ 上一级', on: { click: e => { e.preventDefault(); open(rel.split('/').slice(0, -1).join('/')); } } }))] : []),
-              ...(r.entries.length ? r.entries.map(x => { const full = (rel ? rel + '/' : '') + x.name, isFile = x.type === 'file'; return el('div', { class: 'team-row' }, el('a', { href: '#', class: 'grow', textContent: (x.type === 'dir' ? '📁 ' : '📄 ') + x.name, on: { click: e => { e.preventDefault(); open(full); } } }), el('small', { textContent: x.type === 'dir' ? '' : `${x.size > 1024 ? (x.size / 1024).toFixed(1) + ' KB' : x.size + ' B'}${x.mtime ? '　' + new Date(x.mtime).toLocaleString() : ''}` }), isFile ? el('button', { type: 'button', class: 'secondary', textContent: '历史', title: '查看这个文件的历史版本 / 还原', on: { click: () => fileManager && fileManager.showFile(full) } }) : null, isFile && /\.(html?|md|markdown|svg|png|jpe?g|gif|webp|pdf|txt|json|css|js)$/i.test(x.name) ? el('button', { type: 'button', class: 'secondary', textContent: '预览', title: '在新标签页在线预览（沙箱里运行）', on: { click: () => previewFile(full) } }) : null, isFile ? el('a', { href: `/api/workspaces/${w.id}/download?path=${encodeURIComponent(full)}`, textContent: '下载', title: '下载原始文件（含图片等二进制文件）', style: 'padding:6px 10px;border:1px solid var(--line);border-radius:8px;text-decoration:none;font-size:13px;color:inherit' }) : null, (w.mine || me.role === 'admin') ? el('button', { type: 'button', class: 'secondary', textContent: '删除', title: '删除前会先备份，可在历史里还原', on: { click: async () => { if (!confirm(`删除 ${full}${x.type === 'dir' ? '（整个文件夹）' : ''}？\n删除前会先备份，可在“版本历史”里还原。`)) return; try { await api(`/api/workspaces/${w.id}/files?path=${encodeURIComponent(full)}`, { method: 'DELETE' }); err.textContent = ''; open(rel); } catch (e) { err.textContent = e.message; } } } }) : null); }) : [el('p', { class: 'team-note', textContent: '这里还没有文件。' })]));
+              ...(r.entries.length ? r.entries.map(x => { const full = (rel ? rel + '/' : '') + x.name, isFile = x.type === 'file'; return el('div', { class: 'team-row' }, el('a', { href: '#', class: 'grow', textContent: (x.type === 'dir' ? '📁 ' : '📄 ') + x.name, on: { click: e => { e.preventDefault(); open(full); } } }), el('small', { textContent: x.type === 'dir' ? '' : `${x.size > 1024 ? (x.size / 1024).toFixed(1) + ' KB' : x.size + ' B'}${x.mtime ? '　' + new Date(x.mtime).toLocaleString() : ''}` }), isFile ? el('button', { type: 'button', class: 'secondary', textContent: '历史', title: '查看这个文件的历史版本 / 还原', on: { click: () => fileManager && fileManager.showFile(full) } }) : null, isFile && /\.(html?|md|markdown|svg|png|jpe?g|gif|webp|pdf|txt|json|css|js)$/i.test(x.name) ? el('button', { type: 'button', class: 'secondary', textContent: '预览', title: '在新标签页在线预览（沙箱里运行）', on: { click: () => previewFile(full) } }) : null, isFile ? el('a', { href: `/api/workspaces/${w.id}/download?path=${encodeURIComponent(full)}`, textContent: '下载', title: '下载原始文件（含图片等二进制文件）', style: 'padding:6px 10px;border:1px solid var(--line);border-radius:8px;text-decoration:none;font-size:13px;color:inherit' }) : null, (w.mine || me.role === 'admin') ? el('button', { type: 'button', class: 'secondary', textContent: '删除', title: '删除前会先备份，可在历史里还原', on: { click: async () => { if (!await ymConfirm(`删除 ${full}${x.type === 'dir' ? '（整个文件夹）' : ''}？\n删除前会先备份，可在“版本历史”里还原。`, { danger: true, okText: '确定' })) return; try { await api(`/api/workspaces/${w.id}/files?path=${encodeURIComponent(full)}`, { method: 'DELETE' }); err.textContent = ''; open(rel); } catch (e) { err.textContent = e.message; } } } }) : null); }) : [el('p', { class: 'team-note', textContent: '这里还没有文件。' })]));
           } else { viewer.hidden = false; crumb.textContent = '/' + rel; showFile(r, hl); }
         } catch (e) { crumb.textContent = e.message; }
       };
@@ -905,7 +905,7 @@
       const importPick = el('input', { type: 'file', accept: '.zip,application/zip', hidden: true });
       importPick.addEventListener('change', async () => {
         const f = importPick.files[0]; importPick.value = ''; if (!f) return;
-        if (!confirm('把 ' + f.name + ' 导入到这个工作区？\n同名文件会被覆盖（覆盖前旧内容会自动备份，可在“版本历史”里还原）。')) return;
+        if (!await ymConfirm('把 ' + f.name + ' 导入到这个工作区？\n同名文件会被覆盖（覆盖前旧内容会自动备份，可在“版本历史”里还原）。', { danger: true, okText: '确定' })) return;
         projStatus.textContent = '正在导入…'; err.textContent = '';
         try {
           const response = await fetch(`/api/workspaces/${w.id}/import`, { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/zip', 'X-CSRF-Token': csrf }, body: f });
@@ -1198,7 +1198,7 @@
     dim.addEventListener('input', () => applyWallpaper(wallState.choice, Number(dim.value)));
     dim.addEventListener('change', () => save(wallState.choice));
     const tile = (choice, label, style, deletable) => el('button', { type: 'button', class: 'wall-tile' + (wallState.choice === choice ? ' on' : '') + (choice === '' ? ' none' : ''), style, title: label, on: { click: () => save(choice) } },
-      el('span', { textContent: label }), deletable ? el('button', { type: 'button', class: 'wall-del', textContent: '×', title: '删除', on: { click: async e => { e.stopPropagation(); if (!confirm('删除壁纸“' + label + '”？所有成员都会失去它。')) return; await api('/api/admin/wallpapers/' + encodeURIComponent(choice), { method: 'DELETE' }); render(); } } }) : null);
+      el('span', { textContent: label }), deletable ? el('button', { type: 'button', class: 'wall-del', textContent: '×', title: '删除', on: { click: async e => { e.stopPropagation(); if (!await ymConfirm('删除壁纸“' + label + '”？所有成员都会失去它。', { danger: true, okText: '确定' })) return; await api('/api/admin/wallpapers/' + encodeURIComponent(choice), { method: 'DELETE' }); render(); } } }) : null);
     const file = el('input', { type: 'file', accept: '.webp,.png,.jpg,.jpeg,.mp4' });
     // ---- 上传：图片先压缩，XHR 显示进度，可取消 ----
     const bar = el('div', { style: 'height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin-top:6px' }, el('div', { style: 'height:100%;width:0;background:var(--accent);transition:width .15s' }));
@@ -1299,7 +1299,7 @@
           el('button', { type: 'button', class: 'secondary', textContent: '查看/编辑', on: { click: () => { fill(s); window.scrollTo(0, 0); f.title.focus(); } } }),
           el('a', { class: 'secondary', href: `/api/skills/${s.id}/export`, textContent: '导出', style: 'display:inline-flex;align-items:center;text-decoration:none;color:inherit' }),
           (s.mine || me.role === 'admin') ? el('button', { type: 'button', class: 'secondary', textContent: '发布到市场', on: { click: () => publishToMarket('skill', s.id, s.title) } }) : null,
-          (s.mine || me.role === 'admin') ? el('button', { type: 'button', class: 'secondary', textContent: '删除', on: { click: async () => { if (!confirm('删除技能“' + s.title + '”？已绑定它的智能体会自动解除。')) return; await api('/api/skills/' + s.id, { method: 'DELETE' }); render(); } } }) : null))) : el('p', { class: 'team-note', textContent: '还没有技能。' }),
+          (s.mine || me.role === 'admin') ? el('button', { type: 'button', class: 'secondary', textContent: '删除', on: { click: async () => { if (!await ymConfirm('删除技能“' + s.title + '”？已绑定它的智能体会自动解除。', { danger: true, okText: '确定' })) return; await api('/api/skills/' + s.id, { method: 'DELETE' }); render(); } } }) : null))) : el('p', { class: 'team-note', textContent: '还没有技能。' }),
       el('h3', { textContent: '创建 / 编辑技能' }),
       el('div', { class: 'team-form' }, f.title, me.role === 'admin' ? el('label', {}, f.shared, ' 共享给全部成员') : el('span'), f.description, f.content, save,
         editing && el('button', { type: 'button', class: 'secondary wide', textContent: '取消编辑', on: { click: () => render() } })),
@@ -1315,9 +1315,9 @@
   // ---------- 市场：技能与机器人模板 ----------
   let marketView = 'skills', marketQuery = '', marketSource = '';
   const publishToMarket = async (type, id, title) => {
-    const tags = prompt('把「' + title + '」投稿到市场。可以填 1–5 个标签，用逗号分隔（可留空）：', '');
+    const tags = await ymPrompt('把「' + title + '」投稿到市场。可以填 1–5 个标签，用逗号分隔（可留空）：', '');
     if (tags === null) return;
-    try { const r = await api('/api/market/publish', { method: 'POST', body: JSON.stringify({ type, id, tags }) }); alert(r.published ? '已上架到市场' : '已提交，等待管理员审核。可以在「市场 → 我的投稿」查看进度。'); } catch (e) { alert(e.message); }
+    try { const r = await api('/api/market/publish', { method: 'POST', body: JSON.stringify({ type, id, tags }) }); ymAlert(r.published ? '已上架到市场' : '已提交，等待管理员审核。可以在「市场 → 我的投稿」查看进度。'); } catch (e) { ymAlert(e.message); }
   };
   // 内容查看弹窗：loader 可以是字符串或返回字符串的（异步）函数；Esc、点遮罩、关闭按钮都能关
   const cjkRatio = t => { const m = String(t || '').match(/[\u4e00-\u9fff]/g); const letters = String(t || '').replace(/[\s\d\p{P}]/gu, '').length || 1; return (m ? m.length : 0) / letters; };
@@ -1412,7 +1412,7 @@
     const tools = el('div', { class: 'mk-tools' }, search, sourceFilter);
     const mine = el('div', {}, data.mine.length ? data.mine.map(m => el('div', { class: 'team-row' },
       el('div', { class: 'grow' }, m.title + '　' + (m.type === 'bot' ? '机器人模板' : '技能'), el('small', { textContent: STATUS_TEXT[m.status] + (m.note ? '　' + m.note : '') + '　' + fmt(m.createdAt) })),
-      el('button', { type: 'button', class: 'secondary', textContent: m.status === 'published' ? '下架并删除' : '撤回', on: { click: async () => { if (!confirm('确定' + (m.status === 'published' ? '下架并删除' : '撤回') + '「' + m.title + '」？已经安装它的人不受影响。')) return; await api('/api/market/items/' + m.id, { method: 'DELETE' }); again(); } } })))
+      el('button', { type: 'button', class: 'secondary', textContent: m.status === 'published' ? '下架并删除' : '撤回', on: { click: async () => { if (!await ymConfirm('确定' + (m.status === 'published' ? '下架并删除' : '撤回') + '「' + m.title + '」？已经安装它的人不受影响。', { danger: true, okText: '确定' })) return; await api('/api/market/items/' + m.id, { method: 'DELETE' }); again(); } } })))
       : [el('div', { class: 'team-empty', textContent: '你还没有投稿。在「技能工坊」或「机器人」里点“发布到市场 / 发布为模板”即可提交；成员投稿需要管理员审核。' })]);
     body.append(
       banner && (typeof banner === 'string' ? el('div', { class: 'team-note mk-banner', textContent: banner }) : banner),
@@ -1437,7 +1437,7 @@
           el('small', { textContent: sk.ownerName + '（' + sk.ownerEmail + '）　' + originText(sk.origin) + '　' + sk.length + ' 字　被 ' + sk.usedByAgents + ' 个智能体使用　' + fmt(sk.createdAt) }),
           el('button', { type: 'button', class: 'secondary', textContent: '查看内容', style: 'margin-top:6px', on: { click: () => showContent(sk.title, sk.ownerName + '（' + sk.ownerEmail + '）', sk.preview + (sk.length > 800 ? '\n…（共 ' + sk.length + ' 字）' : '')) } })),
         el('button', { type: 'button', class: 'secondary', textContent: '移除', on: { click: async () => {
-          if (!confirm('移除 ' + sk.ownerName + ' 的技能「' + sk.title + '」？它在智能体上的绑定会一并解除，不可恢复。')) return;
+          if (!await ymConfirm('移除 ' + sk.ownerName + ' 的技能「' + sk.title + '」？它在智能体上的绑定会一并解除，不可恢复。', { danger: true, okText: '确定' })) return;
           try { await api('/api/skills/' + sk.id, { method: 'DELETE' }); render(); } catch (e) { err.textContent = e.message; }
         } } }))) : [el('div', { class: 'team-empty', textContent: '没有符合条件的技能。' })]));
     };
@@ -1471,7 +1471,7 @@
         el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' },
           el('button', { type: 'button', class: 'secondary', textContent: '刷新', on: { click: () => srcCall('/api/admin/market/sources/' + src.id + '/refresh', 'POST') } }),
           el('button', { type: 'button', class: 'secondary', textContent: src.enabled ? '停用' : '启用', on: { click: () => srcCall('/api/admin/market/sources/' + src.id, 'PATCH', { enabled: !src.enabled }) } }),
-          el('button', { type: 'button', class: 'secondary', textContent: '删除', on: { click: () => { if (confirm('删除来源“' + src.name + '”？已经安装的内容不受影响。')) srcCall('/api/admin/market/sources/' + src.id, 'DELETE'); } } }))))
+          el('button', { type: 'button', class: 'secondary', textContent: '删除', on: { click: async () => { if (await ymConfirm('删除来源“' + src.name + '”？已经安装的内容不受影响。', { danger: true, okText: '确定' })) srcCall('/api/admin/market/sources/' + src.id, 'DELETE'); } } }))))
         : el('div', { class: 'team-empty', textContent: '还没有外部来源。' }),
       suggested.some(item => !item.added) ? [el('h3', { textContent: '推荐来源（一键添加）' }), suggested.filter(item => !item.added).map(item => el('div', { class: 'team-row' },
         el('div', { class: 'grow' }, item.name + (item.repo ? '　' + item.repo : item.variant === 'mirror' ? '　mirror-cn.clawhub.com' : '　clawhub.ai'), el('small', { textContent: item.note + '　许可：' + item.license + '（仅供参考，请自行确认）' })),
@@ -1481,10 +1481,10 @@
       el('h3', { textContent: '待审核 ' + data.pending.length }),
       data.pending.length ? data.pending.map(m => row(m, [
         el('button', { type: 'button', class: 'secondary', textContent: '通过上架', on: { click: () => act(m.id, 'approve') } }),
-        el('button', { type: 'button', class: 'secondary', textContent: '拒绝', on: { click: () => { const note = prompt('拒绝原因（会显示给投稿人，可留空）：', ''); if (note !== null) act(m.id, 'reject', note); } } })]))
+        el('button', { type: 'button', class: 'secondary', textContent: '拒绝', on: { click: async () => { const note = await ymPrompt('拒绝原因（会显示给投稿人，可留空）：', ''); if (note !== null) act(m.id, 'reject', note); } } })]))
         : el('div', { class: 'team-empty', textContent: '没有待审核的投稿。' }),
       el('h3', { textContent: '已上架 ' + data.published.length }),
-      data.published.map(m => row(m, el('button', { type: 'button', class: 'secondary', textContent: '下架', on: { click: () => { const note = prompt('下架原因（可留空）：', ''); if (note !== null) act(m.id, 'unpublish', note); } } }))),
+      data.published.map(m => row(m, el('button', { type: 'button', class: 'secondary', textContent: '下架', on: { click: async () => { const note = await ymPrompt('下架原因（可留空）：', ''); if (note !== null) act(m.id, 'unpublish', note); } } }))),
       data.rejected.length ? [el('h3', { textContent: '未上架 ' + data.rejected.length }), data.rejected.map(m => row(m, el('button', { type: 'button', class: 'secondary', textContent: '重新上架', on: { click: () => act(m.id, 'approve') } })))] : null,
       err);
   }
@@ -1499,7 +1499,7 @@
     const showBotMemories = async b => {
       const d = await api(`/api/bots/${b.id}/memories`), bySession = new Map();
       for (const m of d.memories) { if (!bySession.has(m.session)) bySession.set(m.session, []); bySession.get(m.session).push(m); }
-      const del = async (path, ask) => { if (ask && !confirm(ask)) return; await api(path, { method: 'DELETE' }); showBotMemories(b); };
+      const del = async (path, ask) => { if (ask && !await ymConfirm(ask)) return; await api(path, { method: 'DELETE' }); showBotMemories(b); };
       memBox.replaceChildren(el('h4', { textContent: `机器人“${b.name}”的记忆` }),
         el('p', { class: 'team-note', textContent: '按会话（session）隔离：每个对话对象只用得到自己的记忆，不会带上你的个人记忆，也不会串到别的会话。对话里说“记住：……”也会保存。' }),
         d.memories.length ? el('button', { type: 'button', class: 'secondary', textContent: '清空全部', on: { click: () => del(`/api/bots/${b.id}/memories`, '清空这个机器人的全部记忆？') } }) : el('p', { class: 'team-note', textContent: d.enabled ? '还没有记忆。多聊几轮后会自动出现。' : '记忆已关闭。' }),
@@ -1520,8 +1520,8 @@
           el('button', { type: 'button', class: 'secondary', textContent: b.memory ? '记忆：开' : '记忆：关', title: '开启后，机器人会按会话记住对话对象的偏好和背景', on: { click: async () => { await api('/api/bots/' + b.id, { method: 'PATCH', body: JSON.stringify({ memory: !b.memory }) }); render(); } } }),
           el('button', { type: 'button', class: 'secondary', textContent: `查看记忆（${b.memoryCount}）`, on: { click: () => showBotMemories(b).catch(e => { err.textContent = e.message; }) } }),
           el('button', { type: 'button', class: 'secondary', textContent: '发布为模板', on: { click: () => publishToMarket('bot', b.id, b.name) } }),
-          el('button', { type: 'button', class: 'secondary', textContent: '换令牌', on: { click: async () => { if (!confirm('换令牌后，旧令牌立即失效。继续？')) return; const r = await api(`/api/bots/${b.id}/rotate`, { method: 'POST', body: '{}' }); const fresh = flatBox(); body.replaceChildren(fresh); await renderBots(fresh, `新令牌（只显示这一次）：${r.token}\n地址：${urlOf(r.bot)}`); } } }),
-          el('button', { type: 'button', class: 'secondary', textContent: '删除', on: { click: async () => { if (!confirm('删除机器人“' + b.name + '”及它的会话记录？')) return; await api('/api/bots/' + b.id, { method: 'DELETE' }); render(); } } })))) : el('p', { class: 'team-note', textContent: '还没有机器人。' }),
+          el('button', { type: 'button', class: 'secondary', textContent: '换令牌', on: { click: async () => { if (!await ymConfirm('换令牌后，旧令牌立即失效。继续？', { danger: true, okText: '确定' })) return; const r = await api(`/api/bots/${b.id}/rotate`, { method: 'POST', body: '{}' }); const fresh = flatBox(); body.replaceChildren(fresh); await renderBots(fresh, `新令牌（只显示这一次）：${r.token}\n地址：${urlOf(r.bot)}`); } } }),
+          el('button', { type: 'button', class: 'secondary', textContent: '删除', on: { click: async () => { if (!await ymConfirm('删除机器人“' + b.name + '”及它的会话记录？', { danger: true, okText: '确定' })) return; await api('/api/bots/' + b.id, { method: 'DELETE' }); render(); } } })))) : el('p', { class: 'team-note', textContent: '还没有机器人。' }),
       memBox,
       el('p', { class: 'team-note' }, '调用示例：', el('code', { textContent: `curl ${location.origin}/bot/<机器人ID> -H "Authorization: Bearer bot_…" -H "Content-Type: application/json" -d '{"text":"你好","session":"用户A"}'  →  {"reply":"…"}` })));
   }
@@ -1704,7 +1704,7 @@
       } catch (e) { err.textContent = e.message; }
     } } });
     const delKey = el('button', { type: 'button', class: 'secondary', textContent: '删除恢复密钥', on: { click: async () => {
-      if (!confirm('删除后，忘记密码时将不能用恢复密钥重置。确定吗？')) return;
+      if (!await ymConfirm('删除后，忘记密码时将不能用恢复密钥重置。确定吗？', { danger: true, okText: '确定' })) return;
       try { await api('/api/security/recovery-key', { method: 'DELETE', body: JSON.stringify({ password: keyPw.value }) }); keyPw.value = ''; paintStatus({ hasKey: false }); keyOut.replaceChildren(); makeKey.textContent = '生成恢复密钥'; err.textContent = ''; } catch (e) { err.textContent = e.message; }
     } } });
     // 手机批准
@@ -2027,7 +2027,7 @@
       pendingBox.replaceChildren();
       if (!pending) return;
       const applyBtn = el('button', { type: 'button', class: 'primary', textContent: pending.newer ? `更新到 ${pending.version}` : `仍然更新到 ${pending.version}（不高于当前版本）`, on: { click: async () => {
-        if (!confirm(`确认从 ${current} 更新到 ${pending.version}？\n更新前会先备份数据，期间服务会重启几十秒；新版本没起来会自动回滚。`)) return;
+        if (!await ymConfirm(`确认从 ${current} 更新到 ${pending.version}？\n更新前会先备份数据，期间服务会重启几十秒；新版本没起来会自动回滚。`)) return;
         applyBtn.disabled = true; err.textContent = '';
         try { await api('/api/admin/service-update/apply', { method: 'POST', body: JSON.stringify({ confirm: true, sha256: pending.sha256, allowDowngrade: downgrade.checked }) }); watch(current, pending.version); }
         catch (e) { err.textContent = e.message; applyBtn.disabled = false; }
@@ -2124,7 +2124,7 @@
             i.state === 'active' ? el('input', { value: link, readOnly: true, style: 'width:100%;margin-top:6px;border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:transparent;color:var(--ink);font-size:12px', on: { focus: e => e.target.select() } }) : null),
           el('div', { style: 'display:flex;gap:6px;align-items:center' }, hint,
             i.state === 'active' ? el('button', { type: 'button', class: 'secondary', textContent: '复制链接', on: { click: async () => { hint.textContent = (await copyText(link)) ? '已复制' : '请手动选中链接复制'; } } }) : null,
-            el('button', { type: 'button', class: 'secondary', textContent: i.state === 'active' ? '撤销' : '删除', on: { click: async () => { if (i.state === 'active' && !confirm('撤销后这个链接立即失效，确定吗？')) return; try { await api('/api/admin/invites/' + i.id, { method: 'DELETE' }); render(); } catch (e) { alert(e.message); } } } })));
+            el('button', { type: 'button', class: 'secondary', textContent: i.state === 'active' ? '撤销' : '删除', on: { click: async () => { if (i.state === 'active' && !await ymConfirm('撤销后这个链接立即失效，确定吗？', { danger: true, okText: '确定' })) return; try { await api('/api/admin/invites/' + i.id, { method: 'DELETE' }); render(); } catch (e) { ymAlert(e.message); } } } })));
       }));
   }
   // ---------- 桌面端：软件更新引导 ----------
@@ -2182,7 +2182,7 @@
       const go = el('button', { type: 'button', disabled: busy || !info.reachable || same, textContent: goText, on: { click: async () => {
         const note = selFlavor !== flavor ? '会下载约 200MB 的安装包，安装后桌面端会重启，并且需要用' + FLAVOR[selFlavor] + '账号重新登录一次。' : '会下载约 200MB 的安装包，安装后桌面端会重启一次。';
         const pin = selVersion === 'latest' ? '' : '固定在 ' + selVersion + ' 后不再自动更新（要恢复，回来选“最新版”）。';
-        if (!confirm(goText + '：' + note + pin + '继续吗？')) return;
+        if (!await ymConfirm(goText + '：' + note + pin + '继续吗？')) return;
         run({ flavor: selFlavor, version: selVersion }, err);
       } } });
       // ---- 第 2 步：检查更新 ----
@@ -2228,7 +2228,7 @@
   async function renderMembers(body) {
     const { members } = await api('/api/admin/members');
     const err = errBox(), f = { email: el('input', { type: 'email', placeholder: '成员邮箱' }), name: el('input', { placeholder: '显示名称（可选）' }), pw: el('input', { type: 'password', placeholder: '初始密码（至少 12 位）', autocomplete: 'new-password' }), limit: el('input', { type: 'number', min: 0, placeholder: '每日调用上限（0=不限）' }), mcalls: el('input', { type: 'number', min: 0, placeholder: '每月调用上限（0=不限）' }), mtokens: el('input', { type: 'number', min: 0, placeholder: '每月 Token 上限（0=不限）' }), htokens: el('input', { type: 'number', min: 0, placeholder: '每小时 Token 上限（0=不限）' }) };
-    const patch = async (m, data) => { try { await api('/api/admin/members/' + m.id, { method: 'PATCH', body: JSON.stringify(data) }); render(); } catch (e) { alert(e.message); } };
+    const patch = async (m, data) => { try { await api('/api/admin/members/' + m.id, { method: 'PATCH', body: JSON.stringify(data) }); render(); } catch (e) { ymAlert(e.message); } };
     body.append(
       el('p', { class: 'team-note', textContent: '你是主账号。成员使用邮箱和密码登录，只能看到自己的对话；每日调用上限同时约束网页和 API。' }),
       el('div', { class: 'team-form' }, f.email, f.name, f.pw, f.limit, f.mcalls, f.mtokens, f.htokens, el('button', { type: 'button', class: 'secondary wide', textContent: '添加成员', on: { click: async () => {
@@ -2237,23 +2237,23 @@
       members.map(m => el('div', { class: 'team-row' }, el('div', { class: 'grow' }, `${m.displayName}（${m.role === 'admin' ? '主账号' : '成员'}）${m.disabled ? ' · 已停用' : ''}`, el('small', { textContent: `${m.email}　今日 ${m.todayCalls}/${m.dailyLimit || '∞'}　本月 ${num(m.month.calls)}/${m.monthlyCallLimit || '∞'} 次、${num(m.month.totalTokens)}/${m.monthlyTokenLimit || '∞'} tokens　令牌 ${m.tokens}　使用时段 ${m.allowedHours ? m.allowedHours.start + '–' + m.allowedHours.end : '不限'}　最近登录 ${fmt(m.lastLoginAt)}` })),
         m.role !== 'admin' && el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' },
           el('button', { type: 'button', class: 'secondary', textContent: m.disabled ? '启用' : '停用', on: { click: () => patch(m, { disabled: !m.disabled }) } }),
-          el('button', { type: 'button', class: 'secondary', textContent: '额度', on: { click: () => {
-            const v = prompt('额度：每日调用 / 每月调用 / 每月 Token / 每小时 Token（0=不限，用 / 分隔）', [m.dailyLimit, m.monthlyCallLimit, m.monthlyTokenLimit, m.hourlyTokenLimit || 0].join(' / '));
+          el('button', { type: 'button', class: 'secondary', textContent: '额度', on: { click: async () => {
+            const v = await ymPrompt('额度：每日调用 / 每月调用 / 每月 Token / 每小时 Token（0=不限，用 / 分隔）', [m.dailyLimit, m.monthlyCallLimit, m.monthlyTokenLimit, m.hourlyTokenLimit || 0].join(' / '));
             if (v === null) return;
             const [d, c, t, h] = v.split('/').map(x => Number(x.trim() || 0));
             patch(m, { dailyLimit: d, monthlyCallLimit: c ?? 0, monthlyTokenLimit: t ?? 0, hourlyTokenLimit: h ?? 0 });
           } } }),
-          el('button', { type: 'button', class: 'secondary', textContent: '使用时段', on: { click: () => {
-            const v = prompt('允许使用的时段（服务器本地时间，24 小时制），格式 开始-结束，如 09:00-18:00；跨午夜可写 22:00-06:00；留空=不限制', m.allowedHours ? m.allowedHours.start + '-' + m.allowedHours.end : '');
+          el('button', { type: 'button', class: 'secondary', textContent: '使用时段', on: { click: async () => {
+            const v = await ymPrompt('允许使用的时段（服务器本地时间，24 小时制），格式 开始-结束，如 09:00-18:00；跨午夜可写 22:00-06:00；留空=不限制', m.allowedHours ? m.allowedHours.start + '-' + m.allowedHours.end : '');
             if (v === null) return;
             const text = v.replace(/[\s　]/g, '').replace(/[—–～~至到]/g, '-').replace(/：/g, ':');
             if (!text) return patch(m, { allowedHours: null });
             const hit = text.match(/^(\d{1,2}:\d{2})-(\d{1,2}:\d{2})$/);
-            if (!hit) return alert('格式不对，应为 09:00-18:00');
+            if (!hit) return ymAlert('格式不对，应为 09:00-18:00');
             const pad = t => t.padStart(5, '0');
             patch(m, { allowedHours: { start: pad(hit[1]), end: pad(hit[2]) } });
           } } }),
-          el('button', { type: 'button', class: 'secondary', textContent: '重置密码', on: { click: () => { const v = prompt('新密码（至少 12 位）'); if (v) patch(m, { password: v }); } } }),
-          el('button', { type: 'button', class: 'secondary', textContent: '删除', on: { click: async () => { if (!confirm('删除成员及其全部对话、令牌？不可恢复。')) return; try { await api('/api/admin/members/' + m.id, { method: 'DELETE' }); render(); } catch (e) { alert(e.message); } } } })))));
+          el('button', { type: 'button', class: 'secondary', textContent: '重置密码', on: { click: async () => { const v = await ymPrompt('新密码（至少 12 位）', '', { type: 'password', title: '重置密码' }); if (v) patch(m, { password: v }); } } }),
+          el('button', { type: 'button', class: 'secondary', textContent: '删除', on: { click: async () => { if (!await ymConfirm('删除成员及其全部对话、令牌？不可恢复。', { danger: true, okText: '确定' })) return; try { await api('/api/admin/members/' + m.id, { method: 'DELETE' }); render(); } catch (e) { ymAlert(e.message); } } } })))));
   }
 })();

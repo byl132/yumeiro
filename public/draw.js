@@ -35,7 +35,7 @@
     const tools = el('div', { class: 'ym-tools' },
       el('a', { href: image.url, download: 'yumeiro-' + image.id.slice(0, 8) + '.' + (image.mime.split('/')[1] === 'jpeg' ? 'jpg' : image.mime.split('/')[1]), textContent: '下载' }),
       el('button', { type: 'button', textContent: '再画一次', on: { click: () => { refs.prompt.value = image.prompt; refs.prompt.focus(); } } }),
-      el('button', { type: 'button', textContent: '删除', on: { click: async () => { if (!confirm('删除这张图片？')) return; try { await api('/api/images/' + image.id, { method: 'DELETE' }); node.remove(); } catch (e) { refs.status.textContent = e.message; } } } }));
+      el('button', { type: 'button', textContent: '删除', on: { click: async () => { if (!await ymConfirm('删除这张图片？', { danger: true, okText: '确定' })) return; try { await api('/api/images/' + image.id, { method: 'DELETE' }); node.remove(); } catch (e) { refs.status.textContent = e.message; } } } }));
     const node = el('div', { class: 'ym-tile' }, el('img', { src: image.url, alt: image.prompt, loading: 'lazy', on: { click: () => zoom(image.url) } }), el('div', { class: 'ym-cap', title: image.prompt, textContent: image.prompt }), tools);
     return node;
   };

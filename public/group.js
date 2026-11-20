@@ -84,7 +84,7 @@
   function renderList() {
     listBox.replaceChildren(...(groups.length ? groups.map(g => el('div', { className: 'chat' + (current?.id === g.id ? ' active' : '') },
       el('button', { type: 'button', className: 'chat-title', textContent: '👥 ' + g.title, title: g.members.map(m => m.label).join('、'), on: { click: () => openGroup(g.id) } }),
-      el('button', { type: 'button', className: 'del', textContent: '×', title: '删除群聊', on: { click: async e => { e.stopPropagation(); if (!confirm('删除群聊“' + g.title + '”？')) return; try { await api('/api/groups/' + g.id, { method: 'DELETE' }); if (current?.id === g.id) closePanel(); loadList(); } catch (x) { alert(x.message); } } } }))) : [el('div', { className: 'empty-list', textContent: '还没有群聊' })]));
+      el('button', { type: 'button', className: 'del', textContent: '×', title: '删除群聊', on: { click: async e => { e.stopPropagation(); if (!await ymConfirm('删除群聊“' + g.title + '”？', { danger: true, okText: '确定' })) return; try { await api('/api/groups/' + g.id, { method: 'DELETE' }); if (current?.id === g.id) closePanel(); loadList(); } catch (x) { ymAlert(x.message); } } } }))) : [el('div', { className: 'empty-list', textContent: '还没有群聊' })]));
   }
   // 群聊用量：Token 与费用（价格由主账号按模型设置；没设价格的模型只显示 Token）
   async function showUsage() {
@@ -115,7 +115,7 @@
       msgBox.replaceChildren(...data.messages.map(m => bubbleFor(m).row));
       renderChips(); renderEmpty(); setStatus('');
       renderList(); scrollDown(); scanBubbles(); if (!matchMedia('(max-width:760px)').matches) input.focus();
-    } catch (x) { alert(x.message); }
+    } catch (x) { ymAlert(x.message); }
   }
   function closePanel() { panel.hidden = true; current = null; renderList(); }
 

@@ -256,7 +256,7 @@
     const row = item => {
       const late1 = T().overdue(item, day), subDone = item.sub.filter(s => s.done).length;
       const main = el('div', { class: 'sd-tmain' }, el('span', { class: 'sd-tt', textContent: item.t, title: '双击修改', on: { dblclick: e => editTitle(item, e.target) } }),
-        el('div', {}, item.due ? el('span', { class: 'sd-chip' + (late1 ? ' red' : ''), textContent: (late1 ? '已逾期 ' : '📅 ') + item.due.slice(5), title: '点击修改截止日期', style: 'cursor:pointer', on: { click: () => { const v = prompt('截止日期（YYYY-MM-DD，留空清除）', item.due); if (v === null) return; if (v === '' || /^\d{4}-\d{2}-\d{2}$/.test(v)) { item.due = v; item.asked = false; touch(item); render(); } } } }) : null,
+        el('div', {}, item.due ? el('span', { class: 'sd-chip' + (late1 ? ' red' : ''), textContent: (late1 ? '已逾期 ' : '📅 ') + item.due.slice(5), title: '点击修改截止日期', style: 'cursor:pointer', on: { click: async () => { const v = await ymPrompt('截止日期（YYYY-MM-DD，留空清除）', item.due); if (v === null) return; if (v === '' || /^\d{4}-\d{2}-\d{2}$/.test(v)) { item.due = v; item.asked = false; touch(item); render(); } } } }) : null,
           item.remind ? el('span', { class: 'sd-chip', textContent: '⏰ ' + item.remind }) : null, item.group ? el('span', { class: 'sd-chip', textContent: '📁 ' + item.group }) : null,
           ...item.tags.map(tag => el('span', { class: 'sd-chip', textContent: '#' + tag, style: 'cursor:pointer', on: { click: () => { ui.q = tag; save(); render(); } } })),
           item.sub.length ? el('span', { class: 'sd-chip', textContent: '☑ ' + subDone + '/' + item.sub.length }) : null,
@@ -327,7 +327,7 @@
         el('button', { class: 'sd-b', textContent: '放进输入框', on: { click: () => insertToChat(cur.body.trim()) } }),
         el('button', { class: 'sd-b', textContent: '复制', on: { click: async e => { e.target.textContent = (await copy(cur.body)) ? '已复制' : '复制失败'; } } }),
         el('button', { class: 'sd-b', textContent: '✨ 整理成待办', title: '让 AI 从这张便签里提取要做的事（你确认后才加入待办）', disabled: Boolean(aiBusy), on: { click: () => { if (cur.body.trim().length < 4) { pendingAi = { items: [], error: '便签内容太少', source: noteTitle(cur) }; render(); } else aiExtract(cur.body, noteTitle(cur)); } } }),
-        el('button', { class: 'sd-b', textContent: '删除', on: { click: () => { if (!cur.body.trim() || confirm('删除这张便签？')) { removeItem('notes', cur); state.noteId = ''; save(); render(); } } } })));
+        el('button', { class: 'sd-b', textContent: '删除', on: { click: async () => { if (!cur.body.trim() || await ymConfirm('删除这张便签？', { danger: true, okText: '确定' })) { removeItem('notes', cur); state.noteId = ''; save(); render(); } } } })));
     }
     return out.filter(Boolean);
   }
@@ -515,8 +515,8 @@
               h.pom ? el('span', { class: 'sd-chip', textContent: '🍅 ' + Math.min(n, h.pom) + '/' + h.pom, title: '今天的番茄进度，够数自动打卡' }) : null,
               h.remind ? el('span', { class: 'sd-chip', textContent: '⏰ ' + h.remind }) : null)),
           h.pom && !isDone ? el('button', { class: 'sd-b', textContent: '▶', title: '开始一个番茄钟', on: { click: () => startFocus('') } }) : null,
-          el('button', { class: 'sd-b', textContent: '✎', title: '修改名称 / 关联番茄数', on: { click: () => { const nm = prompt('习惯名称', h.name); if (nm === null) return; const pm = prompt('每天完成几个番茄自动打卡（0 = 不关联）', String(h.pom || 0)); h.name = (nm.trim() || h.name).slice(0, 30); if (pm !== null && /^\d+$/.test(pm.trim())) h.pom = Math.min(16, Number(pm)); touch(h); render(); } } }),
-          el('button', { class: 'sd-b', textContent: '×', title: '删除这个习惯（打卡记录一起删除）', on: { click: () => { if (confirm('删除习惯「' + h.name + '」和它的全部打卡记录？')) { removeItem('habits', h); state.checks = state.checks.filter(c => c.h !== h.id); save(); render(); } } } })),
+          el('button', { class: 'sd-b', textContent: '✎', title: '修改名称 / 关联番茄数', on: { click: async () => { const nm = await ymPrompt('习惯名称', h.name); if (nm === null) return; const pm = await ymPrompt('每天完成几个番茄自动打卡（0 = 不关联）', String(h.pom || 0)); h.name = (nm.trim() || h.name).slice(0, 30); if (pm !== null && /^\d+$/.test(pm.trim())) h.pom = Math.min(16, Number(pm)); touch(h); render(); } } }),
+          el('button', { class: 'sd-b', textContent: '×', title: '删除这个习惯（打卡记录一起删除）', on: { click: async () => { if (await ymConfirm('删除习惯「' + h.name + '」和它的全部打卡记录？', { danger: true, okText: '确定' })) { removeItem('habits', h); state.checks = state.checks.filter(c => c.h !== h.id); save(); render(); } } } })),
         el('div', { class: 'sd-week' }, ...week));
     };
     return [

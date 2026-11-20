@@ -1503,6 +1503,7 @@ const staticFiles={
   '/pet-sense.js':{name:'pet-sense.js',type:'text/javascript; charset=utf-8'},
   '/side.js':{name:'side.js',type:'text/javascript; charset=utf-8'},
   '/group.js':{name:'group.js',type:'text/javascript; charset=utf-8'},
+  '/dialog.js':{name:'dialog.js',type:'text/javascript; charset=utf-8'},
   '/side-tools.js':{name:'side-tools.js',type:'text/javascript; charset=utf-8'},
   '/recover.js':{name:'recover.js',type:'text/javascript; charset=utf-8'},
   '/pet/idle.png':{name:'pet/idle.png',type:'image/png'},

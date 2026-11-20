@@ -41,8 +41,8 @@
     const list = el('div', { style: 'max-height:42vh;overflow:auto;border-top:1px solid #e7e8ec' });
     if (!state.memories.length) list.append(el('p', { style: 'color:#777b86;padding:12px 0' }, '还没有记忆。聊几轮后会自动出现，也可以手动添加。'));
     for (const item of state.memories) {
-      const text = el('span', { style: 'flex:1;min-width:0;word-break:break-word;cursor:text', title: '点击修改', on: { click: () => {
-        const next = prompt('修改这条记忆', item.text);
+      const text = el('span', { style: 'flex:1;min-width:0;word-break:break-word;cursor:text', title: '点击修改', on: { click: async () => {
+        const next = await ymPrompt('修改这条记忆', item.text);
         if (next !== null && next.trim() && next.trim() !== item.text) run(() => send('PATCH', '/api/memories/' + item.id, { text: next }));
       } } }, item.text, el('span', { style: 'color:#999;font-size:11px;margin-left:6px' }, (item.kind === 'profile' ? '偏好/身份' : '事实') + (item.source === 'auto' ? ' · 自动' : '')));
       list.append(el('div', { style: 'display:flex;gap:6px;align-items:flex-start;padding:8px 0;border-bottom:1px solid #f0f1f4' },
@@ -51,7 +51,7 @@
         el('button', { type: 'button', class: 'secondary', title: '删除', style: 'padding:2px 8px', on: { click: () => run(() => send('DELETE', '/api/memories/' + item.id)) } }, '✕')));
     }
     body.append(list, el('div', { class: 'modal-actions', style: 'margin-top:12px' },
-      el('button', { type: 'button', class: 'secondary', on: { click: () => { if (state.memories.length && confirm('确定清空全部记忆？此操作不能撤销。')) run(() => send('DELETE', '/api/memories')); } } }, '清空全部')));
+      el('button', { type: 'button', class: 'secondary', on: { click: async () => { if (state.memories.length && await ymConfirm('确定清空全部记忆？此操作不能撤销。', { danger: true, okText: '确定' })) run(() => send('DELETE', '/api/memories')); } } }, '清空全部')));
   }
   async function load() { state = await api('/api/memories'); render(); }
   async function open() {

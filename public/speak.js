@@ -72,7 +72,7 @@
         if (button.classList.contains('on')) { stopPlayback(); return; }
         document.querySelectorAll('.spk-btn.on').forEach(b => { b.classList.remove('on'); b.textContent = '🔊 朗读'; });
         try { await speak(bubbleText(bubble), state => { button.classList.toggle('on', state !== 'idle'); button.textContent = state === 'loading' ? '⏳ 合成中…' : state === 'playing' ? '⏹ 停止' : '🔊 朗读'; }); }
-        catch (e) { button.classList.remove('on'); button.textContent = '🔊 朗读'; button.title = e.message; alert(e.message); }
+        catch (e) { button.classList.remove('on'); button.textContent = '🔊 朗读'; button.title = e.message; ymAlert(e.message); }
       });
       item.append(button);
     }
@@ -145,8 +145,8 @@
 
   async function startCall() {
     if (call) return;
-    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') { alert('语音通话需要 HTTPS（或 localhost）和支持录音的新版浏览器。'); return; }
-    if (busy()) { alert('请等当前回复结束后再开始语音通话。'); return; }
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') { ymAlert('语音通话需要 HTTPS（或 localhost）和支持录音的新版浏览器。'); return; }
+    if (busy()) { ymAlert('请等当前回复结束后再开始语音通话。'); return; }
     const orb = el('div', { class: 'ym-orb' }), title = el('h2', { textContent: '准备中…' }), line = el('div', { class: 'ym-line' });
     const interrupt = el('button', { type: 'button', textContent: '打断并继续听', hidden: true, on: { click: () => stopPlayback() } });
     const end = el('button', { type: 'button', textContent: '结束通话', on: { click: () => close() } });
@@ -183,7 +183,7 @@
         try { await speak(reply); } catch (e) { setUi('listening', '朗读失败', e.message); await sleep(1500); }
       }
     } catch (error) {
-      if (session.alive) { alert(error.message); }
+      if (session.alive) { ymAlert(error.message); }
     } finally { if (call === session) close(); document.removeEventListener('keydown', onKey); }
   }
 
