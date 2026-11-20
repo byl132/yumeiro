@@ -47,15 +47,15 @@
     close();
     const canvas = el('canvas', { style: 'position:absolute;inset:0;width:100%;height:100%;display:block;cursor:default' });
     const tip = el('div', { style: 'position:absolute;pointer-events:none;max-width:260px;padding:8px 10px;border-radius:10px;background:rgba(20,16,40,.88);color:#fff;font-size:12px;line-height:1.5;box-shadow:0 6px 24px #0008;display:none' });
-    const head = el('div', { style: 'position:absolute;left:0;right:0;top:0;display:flex;justify-content:space-between;align-items:center;padding:12px 18px;color:#fff;text-shadow:0 1px 6px #0009;pointer-events:none' },
-      el('div', {}, el('div', { style: 'font-size:18px;font-weight:600;letter-spacing:2px', textContent: '记忆之树' }),
-        el('div', { style: 'font-size:12px;opacity:.85', textContent: `${data.conversations.length} 段对话 · ${data.memories} 条长期记忆 · ${data.workspaces} 个工作区　颜色 = 使用的模型/智能体，分支越长对话越长` })),
-      el('button', { type: 'button', textContent: '关闭 ✕', style: 'pointer-events:auto;border:1px solid #fff6;background:#0004;color:#fff;border-radius:18px;padding:6px 14px;cursor:pointer', on: { click: close } }));
+    const head = el('div', { style: 'position:absolute;left:0;right:0;top:0;display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:calc(12px + env(safe-area-inset-top,0px)) 14px 12px 18px;color:#fff;text-shadow:0 1px 6px #0009;pointer-events:none' },
+      el('div', { style: 'flex:1;min-width:0' }, el('div', { style: 'font-size:18px;font-weight:600;letter-spacing:2px', textContent: '记忆之树' }),
+        el('div', { style: 'font-size:12px;opacity:.85;line-height:1.5;margin-top:2px', textContent: `${data.conversations.length} 段对话 · ${data.memories} 条长期记忆 · ${data.workspaces} 个工作区　颜色 = 使用的模型/智能体，分支越长对话越长` })),
+      el('button', { type: 'button', textContent: '关闭 ✕', style: 'pointer-events:auto;flex:none;white-space:nowrap;border:1px solid #fff6;background:#0004;color:#fff;border-radius:18px;padding:8px 14px;min-height:38px;cursor:pointer', on: { click: close } }));
     overlay = el('div', { role: 'dialog', 'aria-label': '历史记录树', style: 'position:fixed;inset:0;z-index:50;background:#120d2b' }, canvas, head, tip);
     overlay.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
     overlay.tabIndex = -1;
     document.body.append(overlay); overlay.focus();
-    if (!data.conversations.length) { head.append(el('div', { style: 'position:absolute;left:0;right:0;top:50%;text-align:center;font-size:15px', textContent: '还没有对话——聊几句，这棵树就会开始生长。' })); }
+    if (!data.conversations.length) { overlay.append(el('div', { style: 'position:absolute;left:0;right:0;top:34%;padding:0 28px;text-align:center;font-size:15px;line-height:1.7;color:#fff;text-shadow:0 1px 6px #000a;pointer-events:none', textContent: '还没有对话——聊几句，这棵树就会开始生长。' })); }
 
     const ctx = canvas.getContext('2d');
     let W = 0, H = 0, L = null, started = performance.now(), hover = null;
