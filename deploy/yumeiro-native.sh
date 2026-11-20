@@ -165,7 +165,7 @@ sync_code() {
   rm -rf "$APP_DIR/public/downloads"          # 客户端安装包不随程序部署，放在 $DATA_DIR/downloads（见 scripts/install-clients.mjs）
   mkdir -p "$APP_DIR/runner"; cp "$SRC"/runner/*.mjs "$APP_DIR/runner/"
   mkdir -p "$APP_DIR/setup"; cp "$SRC"/setup/*.mjs "$APP_DIR/setup/"
-  mkdir -p "$APP_DIR/deploy"; cp "$SRC"/deploy/* "$APP_DIR/deploy/"; chmod +x "$APP_DIR"/deploy/*.sh
+  mkdir -p "$APP_DIR/deploy"; cp -r "$SRC"/deploy/. "$APP_DIR/deploy/"; chmod +x "$APP_DIR"/deploy/*.sh
   chown -R root:root "$APP_DIR"
   chmod 755 "$APP_DIR"; chmod -R go+rX "$APP_DIR"   # 服务以 yumeiro 用户运行：root 的 umask 过严（如 077）时目录会是 700，导致 status=200/CHDIR
 }
