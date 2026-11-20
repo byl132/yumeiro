@@ -157,3 +157,22 @@ html[data-theme=dark] body.settings-page .team-nav button.on{background:rgba(233
   .ym-guide form{padding-bottom:calc(10px + env(safe-area-inset-bottom,0px))}
   .ym-guide textarea{font-size:16px}
 }
+
+/* ---- 深色主题补充：之前只有部分组件有深色适配，下面补上提示条、客户端引导、市场标签、宠物聊天面板等 ---- */
+html[data-theme=dark] .quota-banner{background:#3a2d12;color:#f0c674;border-color:var(--line)}
+html[data-theme=dark] .quota-banner.exceeded{background:#3b1b1f;color:#ff9aa5}
+html[data-theme=dark] .service-update-banner{background:#3b1b24;color:#ff9aa8;border-bottom-color:#5a2a33}
+html[data-theme=dark] .mk-badge.external{background:#3a2d12;color:#f0c674}
+html[data-theme=dark] .mk-banner{background:#173226;color:#8be0b3;border-color:#245139}
+html[data-theme=dark] .mk-seg button.on{background:#262a38}
+html[data-theme=dark] #clientGuide{background:#000a;color:var(--ink)}
+html[data-theme=dark] #clientGuide .cg-card{background:var(--ym-card);color:var(--ink);box-shadow:0 20px 70px #000a}
+html[data-theme=dark] #clientGuide p,html[data-theme=dark] #clientGuide .cg-note{color:var(--muted)}
+html[data-theme=dark] #clientGuide .cg-close{background:#262a38;color:var(--ink)}
+html[data-theme=dark] #clientGuide a,html[data-theme=dark] #clientGuide button.cg-install{background:transparent;color:var(--ink);border-color:var(--line)}
+html[data-theme=dark] #clientGuide a.cg-primary,html[data-theme=dark] #clientGuide button.cg-install{background:#7955c7;color:#fff;border-color:#7955c7}
+html[data-theme=dark] .login-shell{background:radial-gradient(ellipse at 50% 20%,#1a1d27 0,#0f1117 68%)}
+html[data-theme=dark] .security-note{color:#8a8e9b}
+html[data-theme=dark] .sec-card,html[data-theme=dark] .sec-card input{background:transparent;color:var(--ink)}
+html[data-theme=dark] #mobileToolsPanel{background:var(--ym-card);color:var(--ink)}
+html[data-theme=dark] .gm.assistant,html[data-theme=dark] .ym-guide .gm.user{color:var(--ink)}

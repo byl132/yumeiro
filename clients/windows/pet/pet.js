@@ -740,7 +740,7 @@
   async function openPetChat() {
     if (petChatBox) { petChatBox.remove(); petChatBox = null; return; }
     const css = (el, text) => { el.style.cssText = text; return el; };
-    const box = petChatBox = css(document.createElement('div'), 'position:fixed;right:16px;bottom:16px;z-index:2147483000;width:min(340px,calc(100vw - 32px));max-height:70vh;display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:14px;background:var(--panel,#fff);color:var(--ink,#222);border:1px solid var(--line,#ddd);box-shadow:0 8px 30px rgba(0,0,0,.2);font-size:13px');
+    const box = petChatBox = css(document.createElement('div'), 'position:fixed;right:16px;bottom:16px;z-index:2147483000;width:min(340px,calc(100vw - 32px));max-height:70vh;display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:14px;background:var(--ym-card,#fff);color:var(--ink,#222);border:1px solid var(--line,#ddd);box-shadow:0 8px 30px rgba(0,0,0,.2);font-size:13px');
     const head = css(document.createElement('div'), 'display:flex;align-items:center;gap:6px');
     const title = css(document.createElement('strong'), 'flex:1'); title.textContent = '🦊 宠物 AI';
     const close = document.createElement('button'); close.type = 'button'; close.textContent = '×'; close.onclick = () => { box.remove(); petChatBox = null; };

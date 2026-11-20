@@ -21,7 +21,15 @@ h1{font-size:24px;letter-spacing:-.03em;margin:0}.sub{margin:8px 0 22px;color:va
 .foot{margin-top:18px;font-size:11px;line-height:1.6;color:#989ba4}.foot a{color:var(--muted)}
 .dead{text-align:center;padding:10px 0}.dead .big{font-size:40px}
 @media(max-width:480px){.card{padding:26px 22px}}
-</style></head><body>
+html[data-theme=dark]{color-scheme:dark;--ink:#e8e9ee;--muted:#9a9eab;--line:#2c2f3b;--accent-soft:#34202a}
+html[data-theme=dark] body{background:#0f1117}
+html[data-theme=dark] .shell{background:radial-gradient(60% 50% at 15% 10%,#3a1f2a 0,transparent 70%),radial-gradient(55% 45% at 90% 85%,#1f2440 0,transparent 70%),#0f1117}
+html[data-theme=dark] .card{background:#171a23;box-shadow:0 24px 70px #0008}
+html[data-theme=dark] .field input{background:#12141b;color:var(--ink)}html[data-theme=dark] .field input[readonly]{background:#1c1f29}
+html[data-theme=dark] .note{background:#1c2540;color:#a9c0ff;border-color:#2c3a66}
+html[data-theme=dark] .hint.bad,html[data-theme=dark] .err{color:#ff8a98}html[data-theme=dark] .hint.ok{color:#6fd6a6}
+html[data-theme=dark] .foot{color:#8a8e9b}
+</style><script src="/theme.js"></script></head><body>
 <div class="shell"><div class="card">
   <div class="brand"><div class="mark">Y</div><div class="bn" id="siteName">Yumeiro</div></div>
   <div id="loading" class="sub">正在检查邀请…</div>
