@@ -224,19 +224,20 @@ class ApiClient(private val session: Session) {
     }
 
     /** 远程控制的一帧画面：204 表示暂时没有新画面。 */
-    class Frame(val status: Int, val seq: Long, val bytes: ByteArray?, val online: Boolean, val control: Boolean)
+    class Frame(val status: Int, val seq: Long, val bytes: ByteArray?, val online: Boolean, val control: Boolean, val dlMs: Long = 0, val mode: String = "auto", val profile: String = "")
 
-    fun remoteFrame(id: String, since: Long): Frame {
-        val conn = open("/api/remote/devices/$id/frame?since=$since", "GET", 25000)
+    fun remoteFrame(id: String, since: Long, lastDlMs: Long = 0): Frame {
+        val conn = open("/api/remote/devices/$id/frame?since=$since&dl=$lastDlMs", "GET", 25000)
         try {
             val status = conn.responseCode
             remember(conn)
             if (status == 401) throw ApiException("登录已过期，请重新登录", 401)
             val online = conn.getHeaderField("X-Online") == "1"; val control = conn.getHeaderField("X-Control") == "1"
-            if (status == 204) return Frame(204, since, null, online, control)
+            if (status == 204) return Frame(204, since, null, online, control, 0, conn.getHeaderField("X-Mode") ?: "auto", conn.getHeaderField("X-Profile") ?: "")
             if (status !in 200..299) { val msg = runCatching { JSONObject(readAll(conn.errorStream)).optString("error") }.getOrNull().orEmpty(); throw ApiException(msg.ifBlank { "读取画面失败（HTTP $status）" }, status) }
+            val t0 = System.currentTimeMillis()
             val data = conn.inputStream.use { it.readBytes() }
-            return Frame(200, conn.getHeaderField("X-Seq")?.toLongOrNull() ?: since, data, online, control)
+            return Frame(200, conn.getHeaderField("X-Seq")?.toLongOrNull() ?: since, data, online, control, System.currentTimeMillis() - t0, conn.getHeaderField("X-Mode") ?: "auto", conn.getHeaderField("X-Profile") ?: "")
         } catch (e: ApiException) { throw e } catch (e: Exception) { throw ApiException(explain(e)) } finally { conn.disconnect() }
     }
 

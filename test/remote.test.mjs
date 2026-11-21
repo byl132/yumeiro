@@ -123,3 +123,52 @@ test('仅查看的被控端：即使网页允许控制，也不会执行任何�
   assert.equal(JSON.parse(await (await fetch(base + '/manifest.webmanifest')).text()).display, 'standalone');
   await call(owner, `/api/remote/devices/${agent.device.id}`, 'DELETE');
 });
+
+// ---- 画面清晰度 / 流畅度自动升降档 ----
+import { REMOTE_LEVELS, newAdaptive, sampleAdaptive, remoteProfile, setRemoteMode, normalizeRemoteMode } from '../remote.mjs';
+
+test('自动画质：下载太慢就逐档降，有冷却，降到最低为止', () => {
+  const a = newAdaptive(0); assert.equal(remoteProfile(a).level, 2);
+  assert.equal(sampleAdaptive(a, { dlMs: 1500 }, 1000), false, '刚开始 3 秒内不动');
+  assert.equal(sampleAdaptive(a, { dlMs: 1500 }, 4000), true); assert.equal(remoteProfile(a).level, 3);
+  assert.equal(sampleAdaptive(a, { dlMs: 1500 }, 5000), false, '刚降过要冷却 3 秒');
+  let now = 5000; for (let i = 0; i < 30; i++) { now += 3500; sampleAdaptive(a, { dlMs: 3000 }, now); }
+  assert.equal(remoteProfile(a).level, REMOTE_LEVELS.length - 1, '最多降到最低档');
+  assert.ok(remoteProfile(a).maxWidth <= 800 && remoteProfile(a).quality < 62);
+});
+test('自动画质：电脑端上传慢、观看端落后好几帧，也会降档', () => {
+  const up = newAdaptive(0); assert.equal(sampleAdaptive(up, { upMs: 2000 }, 4000), true);
+  const lag = newAdaptive(0); for (let t = 1; t <= 4; t++) sampleAdaptive(lag, { skipped: 4 }, t * 1000); assert.ok(remoteProfile(lag).level > 2);
+});
+test('自动画质：稳定一阵才慢慢升回来，抖一下不会乱升', () => {
+  const a = newAdaptive(0); a.level = 4; a.changedAt = 0;
+  assert.equal(sampleAdaptive(a, { dlMs: 40, upMs: 40 }, 5000), false, '没稳定够 12 秒不升');
+  assert.equal(sampleAdaptive(a, { dlMs: 800 }, 6000), false); // 抖一下：重新计时，且不会连降（EMA 还没超线）
+  let now = 6000, changed = 0; for (let i = 0; i < 40; i++) { now += 1000; if (sampleAdaptive(a, { dlMs: 40, upMs: 40 }, now)) changed++; }
+  assert.ok(changed >= 1 && remoteProfile(a).level < 4, '稳定以后升了档');
+});
+test('手动模式固定档位，不再自动变；切模式清掉旧测量', () => {
+  const a = newAdaptive(0);
+  assert.equal(remoteProfile(setRemoteMode(a, 'high', 0)).level, 1); assert.equal(sampleAdaptive(a, { dlMs: 5000 }, 99999), false); assert.equal(remoteProfile(a).level, 1);
+  assert.equal(remoteProfile(setRemoteMode(a, 'smooth', 0)).level, 4);
+  assert.equal(remoteProfile(setRemoteMode(a, 'bogus', 0)).mode, 'auto'); assert.equal(normalizeRemoteMode('constructor'), 'auto');
+});
+
+test('整站：观看端报告下载很慢 → 自动降档（响应头里能看到）；手动选“流畅优先/清晰优先”后固定；接口权限', async () => {
+  const agent = await startAgent('画质测试', '--allow-control');
+  const url = since => `/api/remote/devices/${agent.device.id}/frame?since=${since}`;
+  const first = await until(async () => { const r = await call(owner, url(0)); return r.status === 200 ? r : null; }); assert.ok(first, '应该拿到第一帧');
+  assert.equal(first.headers.get('x-mode'), 'auto'); const startWidth = Number(first.headers.get('x-profile').split('|')[0]); assert.equal(startWidth, 1280);
+  // 手动固定
+  assert.equal((await call(owner, `/api/remote/devices/${agent.device.id}/quality`, 'POST', { mode: 'smooth' })).data.mode, 'smooth');
+  let r = await call(owner, url(0)); assert.equal(r.headers.get('x-profile').split('|')[0], '800'); assert.equal(r.headers.get('x-mode'), 'smooth');
+  assert.equal((await call(owner, `/api/remote/devices/${agent.device.id}/quality`, 'POST', { mode: 'high' })).data.profile.maxWidth, 1600);
+  assert.equal((await call(owner, `/api/remote/devices/${agent.device.id}/quality`, 'POST', { mode: '乱写' })).data.mode, 'auto', '不认识的模式回到自动');
+  // 自动：连续报告很慢，隔 3 秒以上再报一次，就会降档
+  await call(owner, url(0) + '&dl=4000'); await new Promise(r => setTimeout(r, 3300));
+  r = await call(owner, url(0) + '&dl=4000'); await new Promise(r => setTimeout(r, 200));
+  r = await call(owner, url(0) + '&dl=4000');
+  const width = Number(r.headers.get('x-profile').split('|')[0]); assert.ok(width < startWidth, '慢了应该降档，当前宽度 ' + width);
+  // 别人的设备不能改画质
+  const other = await call(owner, '/api/remote/devices/00000000-0000-0000-0000-000000000000/quality', 'POST', { mode: 'high' }); assert.equal(other.status, 404);
+});

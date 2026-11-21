@@ -28,7 +28,7 @@ import { fetch as undiciFetch, ProxyAgent } from 'undici';
 import { normalizeTtsConfig, publicTtsConfig, defaultTtsConfig, speechEndpoint, cleanSpeechRequest, buildSpeechRequest, speechCacheKey, sniffAudio, parseMultipart, audioTypeOf, LIMITS as TTS_LIMITS } from './tts.mjs';
 import { createZip, readZip, safeEntryName } from './ziputil.mjs';
 import { VISION_LIMITS, VISION_DIALECTS, DEFAULT_VISION_MODELS, DEFAULT_PROMPT, NO_ROUTE_MESSAGE, defaultVisionConfig, normalizeVisionConfig, publicVisionConfig, visionRoute, isVisionModel, buildVisionRequest, parseVisionResponse, dataUrl, imageParts, describedText, testPng } from './vision.mjs';
-import { REMOTE_LIMITS, OS_LABELS, newPairCode, normalizePairCode, cleanInputEvents, countEvents, isJpeg, cleanDeviceName } from './remote.mjs';
+import { remoteProfile, newAdaptive, sampleAdaptive, setRemoteMode, normalizeRemoteMode, REMOTE_LIMITS, OS_LABELS, newPairCode, normalizePairCode, cleanInputEvents, countEvents, isJpeg, cleanDeviceName } from './remote.mjs';
 import { RECOVERY, newRecoveryKey, normalizeRecoveryKey, passwordProblem, createLimiter, createPhoneStore, createQrStore } from './recover.mjs';
 import QRCode from 'qrcode';
 import { aiKit, contextBundle, runsMarkdown, memoryMarkdown } from './aiexport.mjs';
@@ -2008,7 +2008,7 @@ async function chatHistory(item,user,modelRef){
 const remotePairs=new Map(),remoteRuntime=new Map(),remotePairFails=new Map();
 function remoteRt(id){
   let rt=remoteRuntime.get(id);
-  if(!rt){rt={frame:null,seq:0,w:0,h:0,sw:0,sh:0,viewerAt:0,viewAuditAt:0,frameWaiters:new Set(),queue:[],poll:null,sentWatching:false,caps:{control:false},stats:{events:0,keys:0,textChars:0,clicks:0},statsAt:0,rate:{at:0,n:0}};remoteRuntime.set(id,rt)}
+  if(!rt){rt={frame:null,seq:0,w:0,h:0,sw:0,sh:0,viewerAt:0,viewAuditAt:0,frameWaiters:new Set(),queue:[],poll:null,sentWatching:false,caps:{control:false},adapt:newAdaptive(),stats:{events:0,keys:0,textChars:0,clicks:0},statsAt:0,rate:{at:0,n:0}};remoteRuntime.set(id,rt)}
   return rt;
 }
 const remoteOnline=device=>Date.now()-(device.lastSeen||0)<REMOTE_LIMITS.offlineMs;
@@ -2022,7 +2022,8 @@ function remoteDrop(id){
 }
 function remotePollReply(res,device,rt){
   rt.sentWatching=remoteWatching(rt);
-  json(res,200,{watching:rt.sentWatching,fps:3,quality:55,maxWidth:1280,allowControl:Boolean(device.allowControl),commands:device.allowControl?rt.queue.splice(0,100):(rt.queue.length=0,[])});
+  const profile=remoteProfile(rt.adapt);
+  json(res,200,{watching:rt.sentWatching,fps:profile.fps,quality:profile.quality,maxWidth:profile.maxWidth,level:profile.level,allowControl:Boolean(device.allowControl),commands:device.allowControl?rt.queue.splice(0,100):(rt.queue.length=0,[])});
 }
 function remoteWake(rt){
   if(!rt.poll)return;
@@ -2030,7 +2031,8 @@ function remoteWake(rt){
   const device=db.remoteDevices[poll.deviceId];
   if(device)remotePollReply(poll.res,device,rt);else json(poll.res,401,{error:'设备已被取消配对'});
 }
-const remoteHeaders=(device,rt)=>({'Cache-Control':'no-store','X-Online':remoteOnline(device)?'1':'0','X-Control':device.allowControl&&rt.caps.control?'1':'0','X-Screen-Width':String(rt.sw||0),'X-Screen-Height':String(rt.sh||0)});
+const remoteProfileHeaders=rt=>{const p=remoteProfile(rt.adapt);return {'X-Mode':p.mode,'X-Level':String(p.level),'X-Profile':p.maxWidth+'|'+p.quality+'|'+p.fps}};
+const remoteHeaders=(device,rt)=>({'Cache-Control':'no-store','X-Online':remoteOnline(device)?'1':'0','X-Control':device.allowControl&&rt.caps.control?'1':'0','X-Screen-Width':String(rt.sw||0),'X-Screen-Height':String(rt.sh||0),...remoteProfileHeaders(rt)});
 function remoteSendFrame(res,device,rt){
   res.writeHead(200,{...remoteHeaders(device,rt),'Content-Type':'image/jpeg','Content-Length':rt.frame.length,'X-Seq':String(rt.seq),'X-Width':String(rt.w),'X-Height':String(rt.h),'X-Content-Type-Options':'nosniff'});
   res.end(rt.frame);
@@ -2073,6 +2075,7 @@ async function handleRemoteAgent(req,res,pathname,url){
     const data=await readRaw(req,REMOTE_LIMITS.frameMaxBytes);
     if(!isJpeg(data))return json(res,400,{error:'不是 JPEG 图片'});
     const num=name=>Math.max(0,Math.min(20000,Math.floor(Number(req.headers[name])||0)));
+    const upMs=Math.max(0,Math.min(20000,Number(req.headers['x-up-ms'])||0));if(remoteWatching(rt)&&sampleAdaptive(rt.adapt,{upMs}))remoteWake(rt);
     rt.frame=data;rt.w=num('x-width');rt.h=num('x-height');rt.sw=num('x-screen-width')||rt.w;rt.sh=num('x-screen-height')||rt.h;rt.seq++;
     remoteFlushFrameWaiters(rt,device);
     return json(res,200,{ok:true,watching:remoteWatching(rt)});
@@ -3883,7 +3886,7 @@ const server=http.createServer(async(req,res)=>{
       return json(res,201,{code,control,expiresAt:Date.now()+REMOTE_LIMITS.pairTtlMs});
     }
     if(pathname==='/api/remote/devices'&&req.method==='GET')return json(res,200,{devices:Object.values(db.remoteDevices).filter(item=>item.ownerId===session.user.id).sort((a,b)=>a.pairedAt-b.pairedAt).map(safeRemoteDevice)});
-    const remoteMatch=pathname.match(/^\/api\/remote\/devices\/([0-9a-f-]+)(?:\/(frame|input|stop))?$/i);
+    const remoteMatch=pathname.match(/^\/api\/remote\/devices\/([0-9a-f-]+)(?:\/(frame|input|stop|quality))?$/i);
     if(remoteMatch){
       const device=db.remoteDevices[remoteMatch[1]],action=(remoteMatch[2]||'').toLowerCase();
       if(!device||device.ownerId!==session.user.id)return json(res,404,{error:'设备不存在'});
@@ -3901,9 +3904,15 @@ const server=http.createServer(async(req,res)=>{
         }
         await persist();return json(res,200,{device:safeRemoteDevice(device)});
       }
+      if(action==='quality'&&req.method==='POST'){
+        const mode=normalizeRemoteMode(String((await readBody(req)).mode||'auto'));setRemoteMode(rt.adapt,mode);remoteWake(rt);
+        return json(res,200,{mode,profile:remoteProfile(rt.adapt)});
+      }
       if(action==='stop'&&req.method==='POST'){rt.viewerAt=0;rt.queue.length=0;remoteWake(rt);remoteFlushFrameWaiters(rt,device,true);return json(res,200,{ok:true})}
       if(action==='frame'&&req.method==='GET'){
         const since=Number(url.searchParams.get('since')||0)||0,wasWatching=remoteWatching(rt);
+        // 观看端报告：上一帧下载花了多少毫秒；落后了几帧（服务器上已经有更新的画面，说明它没跟上）
+        if(wasWatching){const dlMs=Math.max(0,Math.min(20000,Number(url.searchParams.get('dl')||0)||0)),skipped=rt.frame&&since>0&&rt.seq>since+1?rt.seq-since-1:0;if(sampleAdaptive(rt.adapt,{dlMs,skipped}))remoteWake(rt)}
         rt.viewerAt=Date.now();
         if(!wasWatching){
           remoteWake(rt);

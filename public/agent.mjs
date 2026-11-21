@@ -306,7 +306,8 @@ async function main() {
   const control = Boolean(config.control && backend.canControl);
   log(`已连接到 ${config.server} · 本机${control ? '允许被控制' : '只允许被查看'} · 按 Ctrl+C 退出`);
   let want = { watching: false, fps: 3, quality: 55, maxWidth: 1280 }, running = true, queue = Promise.resolve(), lastHash = '', lastSent = 0;
-  const fpsCap = Math.max(1, Math.min(8, Number(args.fps) || 5));
+  const fpsCap = Math.max(1, Math.min(15, Number(args.fps) || 10)); // 实际帧率由服务器按网络情况自动调整，这里只是上限
+  let lastUpMs = 0;
   const stop = async () => { running = false; await backend.stop(); process.exit(0); };
   process.on('SIGINT', stop); process.on('SIGTERM', stop);
 
@@ -318,7 +319,8 @@ async function main() {
         const frame = await backend.capture(want.maxWidth, want.quality), hash = createHash('md5').update(frame.jpeg).digest('hex');
         if (hash !== lastHash || Date.now() - lastSent > 4000) {
           lastHash = hash; lastSent = Date.now();
-          const response = await api(config, '/remote/agent/frame', { method: 'POST', headers: { 'Content-Type': 'image/jpeg', 'X-Width': String(frame.w), 'X-Height': String(frame.h), 'X-Screen-Width': String(frame.sw), 'X-Screen-Height': String(frame.sh) }, body: frame.jpeg });
+          const response = await api(config, '/remote/agent/frame', { method: 'POST', headers: { 'Content-Type': 'image/jpeg', 'X-Width': String(frame.w), 'X-Height': String(frame.h), 'X-Screen-Width': String(frame.sw), 'X-Screen-Height': String(frame.sh), 'X-Up-Ms': String(lastUpMs) }, body: frame.jpeg });
+          lastUpMs = Date.now() - lastSent;
           const result = await response.json().catch(() => ({})); if (result.watching === false) want.watching = false;
         }
       } catch (error) { if (error.fatal) { console.error(error.message); await stop(); } log('截图/上传出错：' + error.message); await sleep(1500); }

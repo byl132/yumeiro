@@ -231,17 +231,19 @@ fun RemoteViewScreen(vm: AppViewModel) {
     val land = androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
     var frame by remember { mutableStateOf<ImageBitmap?>(null) }; var status by remember { mutableStateOf("正在连接…") }; var canControl by remember { mutableStateOf(dev.control) }
     var mods by remember { mutableStateOf(setOf<String>()) }
+    var quality by remember { mutableStateOf("auto") }; var profile by remember { mutableStateOf("") }
     val mac = dev.osLabel.contains("mac", ignoreCase = true)
     fun back() { phone.stopRemote(); phone.device = null; vm.open(Screen.Remote) }
     BackHandler { back() }
     // 离开这个页面时恢复成跟随系统的方向
     DisposableEffect(Unit) { onDispose { activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED } }
     LaunchedEffect(dev.id) {
-        var seq = 0L
+        var seq = 0L; var lastDl = 0L
         while (isActive) {
             try {
-                val f = withContext(Dispatchers.IO) { vm.api.remoteFrame(dev.id, seq) }
-                canControl = f.control
+                val f = withContext(Dispatchers.IO) { vm.api.remoteFrame(dev.id, seq, lastDl) }
+                canControl = f.control; quality = f.mode; profile = f.profile
+                if (f.dlMs > 0) lastDl = f.dlMs
                 if (f.bytes != null) {
                     seq = f.seq; val bmp = withContext(Dispatchers.Default) { BitmapFactory.decodeByteArray(f.bytes, 0, f.bytes.size) }
                     if (bmp != null) { frame = bmp.asImageBitmap(); status = "" }
@@ -282,12 +284,20 @@ fun RemoteViewScreen(vm: AppViewModel) {
             Text(if (canControl) "可操作" else "仅查看", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(end = 8.dp))
         }
     }
+    @Composable fun qualityBar() {
+        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("画质", color = Muted, fontSize = 12.sp)
+            for ((label, m) in listOf("自动" to "auto", "清晰优先" to "high", "流畅优先" to "smooth")) KeyChip(label, quality == m) { quality = m; phone.setQuality(m) }
+        }
+        val p = profile.split('|')
+        if (p.size == 3) Text("当前：" + p[0] + " 像素宽 · 压缩 " + p[1] + " · 最高 " + p[2] + " 帧/秒" + (if (quality == "auto") "（卡了会自动降，稳定后自动升）" else ""), color = Muted, fontSize = 11.sp)
+    }
     val hint = if (canControl) "点一下 = 单击；快速点两下 = 双击；长按 = 右键。" else "这台电脑是“仅查看”：想操作，请在电脑网页的“远程控制”里开启控制，并用 --allow-control 启动被控端。"
     if (land) {
         Row(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 8.dp)) {
             androidx.compose.foundation.layout.BoxWithConstraints(Modifier.weight(1f).fillMaxSize(), Alignment.Center) { screenImage(maxWidth, maxHeight) }
             Column(Modifier.width(250.dp).fillMaxSize().padding(start = 8.dp).verticalScroll(rememberScrollState())) {
-                header(); Text(hint, color = Muted, fontSize = 11.5.sp)
+                header(); qualityBar(); Text(hint, color = Muted, fontSize = 11.5.sp)
                 if (canControl) KeysPanel(phone, mac, mods, { mods = it }, sendKey, scroll, sendText)
             }
         }
@@ -295,6 +305,7 @@ fun RemoteViewScreen(vm: AppViewModel) {
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 10.dp)) {
             header()
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                qualityBar()
                 androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth(), Alignment.TopCenter) { screenImage(maxWidth, 2000.dp) }
                 if (frame != null && status.isNotEmpty()) Text(status, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
                 Text(hint, color = Muted, fontSize = 12.sp)

@@ -110,6 +110,8 @@ class PhoneState(private val vm: AppViewModel) {
         vm.io({ vm.api.call("POST", "/api/remote/devices/$id/input", JSONObject().put("events", JSONArray(events))) }, onError = { onError(it.message ?: "操作失败") })
     }
 
+    fun setQuality(mode: String) { val id = device?.id ?: return; vm.io({ vm.api.call("POST", "/api/remote/devices/$id/quality", JSONObject().put("mode", mode)) }, onError = { vm.say(it.message ?: "切换失败") }) }
+
     fun stopRemote() { val id = device?.id ?: return; vm.io({ vm.api.call("POST", "/api/remote/devices/$id/stop", JSONObject()) }, onError = {}) }
 
     // ---- 通知 ----

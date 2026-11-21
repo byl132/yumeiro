@@ -81,10 +81,11 @@
     keysBar.append(modBtn('Ctrl', 'ctrl'), modBtn('Alt', 'alt'), modBtn('Shift', 'shift'), modBtn(device.os === 'darwin' ? '⌘' : '⊞ Win', 'meta'),
       keyBtn('Esc', 'escape'), keyBtn('Tab', 'tab'), keyBtn('⌫', 'backspace'), keyBtn('Del', 'delete'), keyBtn('Enter', 'enter'), keyBtn('←', 'left'), keyBtn('↑', 'up'), keyBtn('↓', 'down'), keyBtn('→', 'right'), keyBtn('Home', 'home'), keyBtn('End', 'end'), keyBtn('PgUp', 'pageup'), keyBtn('PgDn', 'pagedown'),
       keyBtn('复制', 'c', [device.os === 'darwin' ? 'meta' : 'ctrl']), keyBtn('粘贴', 'v', [device.os === 'darwin' ? 'meta' : 'ctrl']), keyBtn('全选', 'a', [device.os === 'darwin' ? 'meta' : 'ctrl']), keyBtn('撤销', 'z', [device.os === 'darwin' ? 'meta' : 'ctrl']), keyBtn('Alt+Tab', 'tab', ['alt']), keyBtn(device.os === 'darwin' ? '⌘Space' : '⊞', device.os === 'darwin' ? 'space' : 'meta', device.os === 'darwin' ? ['meta'] : []));
+    const quality = el('select', { 'aria-label': '画质', title: '画质：自动会根据网速自动调；清晰优先画面更细但更吃网速；流畅优先更不卡', on: { change: () => { api('/api/remote/devices/' + v.id + '/quality', { method: 'POST', body: JSON.stringify({ mode: quality.value }) }).catch(() => {}); } } }, el('option', { value: 'auto', textContent: '画质：自动' }), el('option', { value: 'high', textContent: '清晰优先' }), el('option', { value: 'smooth', textContent: '流畅优先' }));
     const modeBtn = el('button', { type: 'button', textContent: '👆 直接点击', title: '切换：直接点击 / 触控板', on: { click: () => { v.mode = v.mode === 'direct' ? 'pad' : 'direct'; dot.style.display = v.mode === 'pad' ? 'block' : 'none'; paintFlags(); } } });
     const bar = el('div', { id: 'vbar' }, el('button', { type: 'button', textContent: '← 返回', on: { click: () => leave() } }), el('b', { textContent: osIcon(device.os) + ' ' + device.name, style: 'white-space:nowrap' }), status,
       el('button', { type: 'button', textContent: '断开', on: { click: () => leave() } }));
-    const tools = el('div', { id: 'vtools' }, modeBtn, flagBtn('右键', 'right', '下一次点击变成右键'), flagBtn('双击', 'double', '下一次点击变成双击'),
+    const tools = el('div', { id: 'vtools' }, quality, modeBtn, flagBtn('右键', 'right', '下一次点击变成右键'), flagBtn('双击', 'double', '下一次点击变成双击'),
       el('button', { type: 'button', textContent: '⌨ 键盘', title: '弹出键盘打字（支持中文输入法）', on: { click: () => { kb.focus(); } } }), el('button', { type: 'button', textContent: '🎛 按键', title: 'Esc / Tab / 方向键 / 组合键', on: { click: () => keysBar.classList.toggle('show') } }),
       el('button', { type: 'button', textContent: '📋 粘贴文字', title: '把手机剪贴板里的文字输入到电脑（长文本、网址、密码都方便）', on: { click: sendClipboard } }),
       el('button', { type: 'button', textContent: '↕ 滚动', 'data-flag': 'scroll', title: '放大后，两指拖动默认移动画面；打开它则两指拖动改为滚动电脑上的页面', on: { click: () => { v.scrollMode = !v.scrollMode; paintFlags(); } } }),
@@ -253,17 +254,17 @@
     let url = '';
     while (v.active) {
       try {
-        const r = await fetch(`/api/remote/devices/${v.id}/frame?since=${v.seq}`, { credentials: 'same-origin', cache: 'no-store' });
+        const r = await fetch(`/api/remote/devices/${v.id}/frame?since=${v.seq}&dl=${v.dl || 0}`, { credentials: 'same-origin', cache: 'no-store' });
         if (!v.active) break;
         if (r.status === 401) { needLogin(); return; }
         if (r.status === 404) { say('设备已被删除', true); await sleep(2000); leave(); return; }
         v.control = r.headers.get('X-Control') === '1';
         if (r.status === 200) {
-          const blob = await r.blob(); v.seq = Number(r.headers.get('X-Seq')) || v.seq + 1; const fw = Number(r.headers.get('X-Width')), fh = Number(r.headers.get('X-Height'));
+          const tb = performance.now(), blob = await r.blob(); v.dl = Math.round(performance.now() - tb); v.profile = (r.headers.get('X-Profile') || '').split('|'); if (document.activeElement !== quality && r.headers.get('X-Mode')) quality.value = r.headers.get('X-Mode'); v.seq = Number(r.headers.get('X-Seq')) || v.seq + 1; const fw = Number(r.headers.get('X-Width')), fh = Number(r.headers.get('X-Height'));
           const next = URL.createObjectURL(blob); img.onload = () => { if (url) URL.revokeObjectURL(url); url = next; }; img.src = next;
           if (fw && (fw !== v.fw || fh !== v.fh)) { v.fw = fw; v.fh = fh; layout(); }
           v.frames++; if (Date.now() - v.fpsAt > 2000) { v.fps = v.frames / ((Date.now() - v.fpsAt) / 1000); v.frames = 0; v.fpsAt = Date.now(); }
-          say((v.control ? '可控制' : '仅查看') + ' · ' + v.fps.toFixed(1) + ' 帧/秒 · ' + (r.headers.get('X-Screen-Width') || '?') + '×' + (r.headers.get('X-Screen-Height') || '?'));
+          say((v.control ? '可控制' : '仅查看') + ' · ' + v.fps.toFixed(1) + ' 帧/秒 · ' + (r.headers.get('X-Screen-Width') || '?') + '×' + (r.headers.get('X-Screen-Height') || '?') + (v.profile && v.profile[0] ? ' · 画质 ' + v.profile[0] + 'px/' + v.profile[1] : ''));
           if (v.mode === 'pad') paintCursor();
         } else if (r.status === 204) {
           if (r.headers.get('X-Online') === '0') { say('设备已离线，等待重新连接…', true); await sleep(2000); } else say((v.control ? '可控制' : '仅查看') + ' · 等待画面变化…');
