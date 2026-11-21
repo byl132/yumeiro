@@ -2406,7 +2406,7 @@
       try {
         const { invite } = await api('/api/admin/invites', { method: 'POST', body: JSON.stringify({ note: v.note, email: v.email.trim(), expiresInDays: n(v.days) || 7, maxUses: n(v.uses) || 1, dailyLimit: n(v.daily), monthlyCallLimit: n(v.monthlyCalls), monthlyTokenLimit: n(v.monthlyTokens), hourlyTokenLimit: n(v.hourlyTokens) }) });
         const link = location.origin + '/invite/' + invite.token;
-        await copyText(link); render(); ymAlert('邀请链接已生成并复制：' + link);
+        await copyText(link); render(); window.ymQr ? window.ymQr(link, '邀请链接已生成（已复制）', { tip: '让对方用手机相机或微信“扫一扫”扫描，打开后自己设置邮箱和密码就能加入；也可以把下面的链接发给他。' }) : ymAlert('邀请链接已生成并复制：' + link);
       } catch (e) { await ymAlert(e.message); createInvite(v); }
     };
     body.append(
@@ -2421,6 +2421,7 @@
             el('small', { textContent: '已用 ' + i.uses + '/' + i.maxUses + '　到期 ' + fmt(i.expiresAt) + (i.email ? '　限 ' + i.email : '') + '　额度 ' + (i.dailyLimit || '∞') + '/日、' + (i.monthlyCallLimit || '∞') + '/月、' + (i.monthlyTokenLimit || '∞') + ' tokens、' + (i.hourlyTokenLimit || '∞') + ' tokens/小时' }),
             i.state === 'active' ? el('input', { value: link, readOnly: true, style: 'width:100%;margin-top:6px;border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:transparent;color:var(--ink);font-size:12px', on: { focus: e => e.target.select() } }) : null),
           el('div', { style: 'display:flex;gap:6px;align-items:center' }, hint,
+            i.state === 'active' ? el('button', { type: 'button', class: 'secondary', textContent: '二维码', title: '显示邀请二维码，让对方用手机扫一扫', on: { click: () => window.ymQr && window.ymQr(link, '邀请：' + (i.note || '未备注'), { tip: '让对方用手机相机或微信“扫一扫”扫描，打开后自己设置邮箱和密码就能加入；也可以把下面的链接发给他。' }) } }) : null,
             i.state === 'active' ? el('button', { type: 'button', class: 'secondary', textContent: '复制链接', on: { click: async () => { hint.textContent = (await copyText(link)) ? '已复制' : '请手动选中链接复制'; } } }) : null,
             el('button', { type: 'button', class: 'secondary', textContent: i.state === 'active' ? '撤销' : '删除', on: { click: async () => { if (i.state === 'active' && !await ymConfirm('撤销后这个链接立即失效，确定吗？', { danger: true, okText: '确定' })) return; try { await api('/api/admin/invites/' + i.id, { method: 'DELETE' }); render(); } catch (e) { ymAlert(e.message); } } } })));
       }));

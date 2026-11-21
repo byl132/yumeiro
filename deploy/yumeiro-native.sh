@@ -432,7 +432,7 @@ server {
     ssl_certificate     $cert;
     ssl_certificate_key $key;
     ssl_protocols TLSv1.2 TLSv1.3;
-    client_max_body_size 200m;
+    client_max_body_size 512m;   # 网页更新要上传整包（含客户端安装包约 200 MB），上限要比应用自己的 400 MB 大
     location / {
         proxy_pass http://127.0.0.1:$app_port;
         proxy_http_version 1.1;

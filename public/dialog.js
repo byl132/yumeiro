@@ -94,4 +94,25 @@
   // 多字段表单：fields = [{ name, label, type, value, min, hint, half, required }]；返回 { name: 字符串 }，取消返回 null；extra = { text } 的按钮返回 { __extra: true }
   window.ymForm = (title, fields, o = {}) => show({ title, message: o.message || '', fields, cancel: true, ...o });
   window.ymAlert = (message, o = {}) => show({ message, cancel: false, ...o });
+  // 二维码弹层：把一个 http(s) 链接变成二维码（由服务器 /api/qr 生成，需要登录）；用于“发到手机”和“邀请成员”
+  const qrCss = document.createElement('style');
+  qrCss.textContent = `.ymq-back{position:fixed;inset:0;z-index:2147483300;background:#10121a99;display:grid;place-items:center;padding:16px}.ymq-box{width:min(340px,100%);max-height:92vh;overflow:auto;background:var(--ym-card,#fff);color:var(--ink,#252832);border:1px solid var(--line,#e7e8ec);border-radius:16px;padding:18px;display:grid;gap:10px;justify-items:center;box-shadow:0 20px 60px #0006;font:14px/1.6 system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}.ymq-title{font-weight:650;font-size:15px;text-align:center;overflow-wrap:anywhere}.ymq-img{width:220px;height:220px;background:#fff;border-radius:12px;padding:8px;box-sizing:content-box}.ymq-tip{font-size:12px;color:var(--muted,#777b86);line-height:1.6;text-align:center}.ymq-url{width:100%;box-sizing:border-box;height:34px;border:1px solid var(--line,#e7e8ec);border-radius:8px;background:transparent;color:inherit;padding:0 8px;font-size:12px}.ymq-row{display:flex;gap:8px}.ymq-row button{min-height:38px;padding:0 18px;border-radius:10px;border:1px solid var(--line,#e7e8ec);background:transparent;color:inherit;cursor:pointer;font:inherit}`;
+  document.head.append(qrCss);
+  window.ymQr = (link, title, o = {}) => {
+    document.querySelector('.ymq-back')?.remove();
+    const back = document.createElement('div'); back.className = 'ymq-back';
+    const box = document.createElement('div'); box.className = 'ymq-box'; box.setAttribute('role', 'dialog'); box.setAttribute('aria-modal', 'true');
+    const h = document.createElement('div'); h.className = 'ymq-title'; h.textContent = title || '二维码';
+    const img = document.createElement('img'); img.className = 'ymq-img'; img.alt = '二维码'; img.src = '/api/qr?text=' + encodeURIComponent(link);
+    img.onerror = () => { img.replaceWith(Object.assign(document.createElement('div'), { className: 'ymq-tip', textContent: '二维码生成失败，请直接复制下面的链接。' })); };
+    const tip = document.createElement('div'); tip.className = 'ymq-tip'; tip.textContent = o.tip || '用手机扫一扫打开。';
+    const url = document.createElement('input'); url.className = 'ymq-url'; url.readOnly = true; url.value = link; url.addEventListener('focus', () => url.select());
+    const row = document.createElement('div'); row.className = 'ymq-row';
+    const copy = document.createElement('button'); copy.type = 'button'; copy.textContent = '复制链接';
+    copy.addEventListener('click', async () => { try { await navigator.clipboard.writeText(link); copy.textContent = '已复制'; } catch { url.focus(); url.select(); copy.textContent = '请手动复制'; } });
+    const close = document.createElement('button'); close.type = 'button'; close.textContent = '关闭';
+    const off = () => { back.remove(); removeEventListener('keydown', key, true); }, key = e => { if (e.key === 'Escape') { e.stopPropagation(); off(); } };
+    close.addEventListener('click', off); back.addEventListener('pointerdown', e => { if (e.target === back) off(); }); addEventListener('keydown', key, true);
+    row.append(copy, close); box.append(h, img, tip, url, row); back.append(box); document.body.append(back); close.focus();
+  };
 })();
