@@ -292,6 +292,7 @@
         el('span', { textContent: `发现 Yumeiro 新版本 ${info.latestVersion}（当前 ${info.currentVersion}），建议先备份再更新。` }),
         el('span', { class: 'acts' },
           info.releaseUrl ? el('a', { href: info.releaseUrl, target: '_blank', rel: 'noopener noreferrer', textContent: '查看发布页' }) : null,
+          info.asset ? el('button', { type: 'button', textContent: '一键更新', style: 'font-weight:650', on: { click: () => installLatestUpdate(info) } }) : null,
           el('button', { type: 'button', textContent: '去更新 →', style: 'font-weight:650', on: { click: () => { location.href = '/admin/settings?tab=service'; } } }),
           el('button', { type: 'button', textContent: '知道了', on: { click: () => { sessionStorage.setItem('service-update-dismiss:' + info.latestVersion, '1'); updateBanner.hidden = true; } } })));
       updateBanner.hidden = false;
@@ -2283,6 +2284,69 @@
     restartTimer();
   }
 
+  // ---- 一键更新：服务器自己从 GitHub 下载安装包 → 验官方签名 → 备份、替换、重启；这里用监视框显示每一步 ----
+  function openUpdateMonitor(from, to) {
+    const STEPS = [['download', '下载安装包'], ['verify', '校验官方签名'], ['install', '备份并替换程序'], ['restart', '重启并检查服务'], ['done', '完成']];
+    const icons = {}, rowEls = {};
+    const list = el('ul', { style: 'list-style:none;margin:10px 0;padding:0' }, STEPS.map(([k, t]) => {
+      icons[k] = el('span', { style: 'width:1.4em;text-align:center;flex:none', textContent: '○' });
+      return rowEls[k] = el('li', { style: 'display:flex;gap:8px;align-items:center;padding:3px 0;opacity:.55' }, icons[k], el('span', { textContent: t }));
+    }));
+    const bar = el('progress', { max: 100, value: 0, hidden: true, style: 'width:100%' }), note = el('div', { class: 'team-note', textContent: '请不要关闭服务器。更新期间页面可能打不开一两分钟，这是正常的。' });
+    const logBox = el('pre', { class: 'team-code', hidden: true, style: 'max-height:160px;overflow:auto;font-size:12px;white-space:pre-wrap' });
+    const msg = el('div', { style: 'font-weight:650;margin-top:6px' });
+    const actions = el('div', { style: 'display:flex;gap:8px;justify-content:flex-end;margin-top:12px' });
+    const closeBtn = el('button', { type: 'button', class: 'secondary', textContent: '关闭（更新不会中断）' });
+    const back = el('div', { role: 'dialog', 'aria-modal': 'true', style: 'position:fixed;inset:0;z-index:2147483250;background:#10121a88;display:grid;place-items:center;padding:16px' },
+      el('div', { style: 'width:min(480px,100%);max-height:88vh;overflow:auto;background:var(--ym-card,#fff);color:var(--ink,#252832);border:1px solid var(--line,#e7e8ec);border-radius:16px;padding:20px;box-shadow:0 20px 60px #0006' },
+        el('h3', { style: 'margin:0', textContent: `更新到 ${to}（当前 ${from}）` }), list, bar, msg, note, logBox, actions));
+    actions.append(closeBtn); document.body.append(back);
+    closeBtn.addEventListener('click', () => back.remove());
+    const keys = STEPS.map(([k]) => k);
+    const mark = (k, state) => { const ic = state === 'done' ? '✓' : state === 'error' ? '✗' : state === 'active' ? '●' : '○'; icons[k].textContent = ic; rowEls[k].style.opacity = state === 'todo' ? '.55' : '1'; rowEls[k].style.color = state === 'error' ? '#d33a4a' : state === 'done' ? 'var(--ok,#2f9e5b)' : ''; };
+    let current = '';
+    return {
+      step(k) { current = k; const i = keys.indexOf(k); keys.forEach((x, j) => mark(x, j < i ? 'done' : j === i ? 'active' : 'todo')); bar.hidden = k !== 'download'; },
+      progress(got, total) { bar.hidden = false; if (total) { bar.value = Math.min(100, got / total * 100); msg.textContent = `已下载 ${(got / 1048576).toFixed(1)} / ${(total / 1048576).toFixed(1)} MB`; } else msg.textContent = `已下载 ${(got / 1048576).toFixed(1)} MB`; },
+      text(t) { msg.textContent = t; },
+      log(t) { if (t) { logBox.textContent = t; logBox.hidden = false; logBox.scrollTop = logBox.scrollHeight; } },
+      done(text) { keys.forEach(k => mark(k, 'done')); bar.hidden = true; msg.textContent = text; note.textContent = ''; closeBtn.textContent = '稍后刷新'; actions.prepend(el('button', { type: 'button', class: 'primary', textContent: '立即刷新页面', on: { click: () => location.reload() } })); },
+      fail(text) { if (current) mark(current, 'error'); bar.hidden = true; msg.textContent = text; msg.style.color = '#d33a4a'; note.textContent = ''; closeBtn.textContent = '关闭'; },
+    };
+  }
+  async function installLatestUpdate(info) {
+    if (!info?.asset) { ymAlert('发布页里没有找到服务端安装包（Yumeiro-x.y.z.zip），请到发布页手动下载后在“服务更新”页上传。'); return; }
+    if (!await ymConfirm(`发现新版本 ${info.latestVersion}（当前 ${info.currentVersion}）。\n服务器会从 GitHub 下载安装包（约 ${(info.asset.size / 1048576).toFixed(0)} MB），校验官方签名后更新。\n更新前自动备份，期间服务会重启一两分钟；新版本没起来会自动回滚。\n\n现在开始吗？`, { okText: '下载并安装' })) return;
+    const mon = openUpdateMonitor(info.currentVersion, info.latestVersion), sleep = ms => new Promise(r => setTimeout(r, ms));
+    try {
+      mon.step('download');
+      await api('/api/admin/service-update/download-latest', { method: 'POST', body: JSON.stringify({ confirm: true }) });
+      let d;
+      for (;;) {
+        await sleep(700); d = await api('/api/admin/service-update/status'); const dl = d.download || {};
+        if (dl.state === 'downloading') mon.progress(dl.received, dl.total);
+        else if (dl.state === 'verifying') { mon.step('verify'); mon.text('下载完成，正在校验官方签名…'); }
+        else if (dl.state === 'failed') throw new Error('下载没有成功：' + (dl.error || '未知原因'));
+        else if (dl.state === 'ready') break;
+      }
+      if (!d.pending) throw new Error('安装包没有保存成功，请重试');
+      mon.step('install'); mon.text('正在备份数据并替换程序…');
+      await api('/api/admin/service-update/apply', { method: 'POST', body: JSON.stringify({ confirm: true, sha256: d.pending.sha256, allowDowngrade: false }) });
+      const t0 = Date.now();
+      for (;;) {
+        await sleep(3000);
+        if (Date.now() - t0 > 15 * 60 * 1000) throw new Error('等了很久还没完成。请到服务器上查看：tail -40 /var/lib/yumeiro-update/update.log');
+        let s;
+        try { const r = await fetch('/api/admin/service-update/status', { credentials: 'same-origin' }); if (!r.ok) { mon.step('restart'); mon.text('服务正在重启，等它恢复…'); continue; } s = await r.json(); }
+        catch { mon.step('restart'); mon.text('服务正在重启，等它恢复…'); continue; }
+        const st = s.status || {};
+        if (st.state === 'running') { mon.log(st.log || ''); }
+        else if (st.state === 'ok' && st.version === info.latestVersion) { mon.done(`更新完成：现在是 ${s.currentVersion}。请刷新页面（Ctrl+F5）。`); return; }
+        else if (st.state === 'failed') { mon.log(st.log || ''); throw new Error(st.interrupted ? '更新中途中断了。服务如果打不开，请在服务器上执行 systemctl start yumeiro。' : '更新没有成功，已自动回滚到旧版本。日志如下：'); }
+      }
+    } catch (e) { mon.fail(e.message); }
+  }
+
   async function renderService(body, refresh = false) {
     const info = await api('/api/admin/service-update' + (refresh ? '?refresh=1' : '')), err = errBox();
     const checkBtn = el('button', { type: 'button', class: 'secondary', textContent: '检查更新', on: { click: async () => {
@@ -2296,11 +2360,13 @@
       : info.updateAvailable
         ? el('div', { class: 'team-err', textContent: `发现新版本 ${info.latestVersion}（当前 ${info.currentVersion}）。到发布页下载 Yumeiro-${info.latestVersion}.zip，在下面“上传压缩包更新”里上传，验证通过后点“更新到 ${info.latestVersion}”。` }, el('a', { href: info.releaseUrl, target: '_blank', rel: 'noopener noreferrer', textContent: ' 打开发布页' }))
         : el('div', { class: 'team-note', textContent: `当前已是最新版本（${info.currentVersion}）。上次检查：${fmt(info.checkedAt)}` });
+    const oneClick = info.updateAvailable && info.asset ? el('div', { style: 'margin:8px 0' }, el('button', { type: 'button', class: 'primary', textContent: `一键下载并安装 ${info.latestVersion}`, on: { click: () => installLatestUpdate(info) } }), el('span', { class: 'team-note', style: 'margin-left:8px', textContent: `从 GitHub 下载约 ${(info.asset.size / 1048576).toFixed(0)} MB，校验官方签名后自动备份并更新` })) : null;
+    const notes = info.updateAvailable && info.notes ? el('details', {}, el('summary', { textContent: '这个版本改了什么' }), el('pre', { class: 'team-code', style: 'white-space:pre-wrap;max-height:220px;overflow:auto', textContent: info.notes })) : null;
     body.append(
       el('div', { class: 'team-row', style: 'display:block;border-color:var(--accent)' },
         el('b', { textContent: '当前服务版本：' + info.currentVersion }),
         el('p', { class: 'team-note', textContent: info.setupCompleted ? '首次安装已完成。管理端会自动检查 GitHub Releases，有新版本时在这里提醒。' : '首次安装尚未完成，请先打开 /setup 完成初始化。' })),
-      el('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap' }, el('h3', { style: 'margin:0', textContent: '服务器服务更新提醒' }), checkBtn), check,
+      el('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap' }, el('h3', { style: 'margin:0', textContent: '服务器服务更新提醒' }), checkBtn), check, oneClick, notes,
       info.latestVersion && el('p', { class: 'team-note', textContent: '最新版本：' + info.latestVersion + (info.publishedAt ? '　发布时间：' + fmt(info.publishedAt) : '') }),
       el('p', { class: 'team-note', textContent: info.message }),
       el('p', { class: 'team-note', textContent: '原生部署（systemd）更新命令：' }), native,

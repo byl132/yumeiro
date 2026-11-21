@@ -46,7 +46,8 @@ const scrypt=promisify(scryptCallback);
 const root=path.dirname(fileURLToPath(import.meta.url));
 const appVersion=(()=>{try{return JSON.parse(readFileSync(path.join(root,'package.json'),'utf8')).version||'未知'}catch{return '未知'}})();
 const updateSource=process.env.SERVICE_UPDATE_URL||'https://api.github.com/repos/yumeiro-ai/yumeiro/releases/latest';
-let updateCache={checkedAt:0,result:null},updateUploading=false;
+let updateCache={checkedAt:0,result:null},updateUploading=false,updateDownload={state:'idle'};
+const updateHostOk=host=>host==='github.com'||host.endsWith('.github.com')||host.endsWith('.githubusercontent.com')||host===(()=>{try{return new URL(updateSource).host}catch{return ''}})();
 function compareVersions(a,b){const pa=String(a||'').replace(/^v/i,'').split('.').map(Number),pb=String(b||'').replace(/^v/i,'').split('.').map(Number);for(let i=0;i<3;i++){const d=(pa[i]||0)-(pb[i]||0);if(d)return d}return 0}
 async function latestServiceUpdate(){
   if(updateCache.result&&Date.now()-updateCache.checkedAt<10*60*1000)return updateCache.result;
@@ -56,7 +57,8 @@ async function latestServiceUpdate(){
     const release=await response.json();
     const latest=String(release.tag_name||'').replace(/^v/i,'');
     if(!/^\d+\.\d+\.\d+(?:[-+].*)?$/.test(latest))throw new Error('invalid release version');
-    const result={currentVersion:appVersion,latestVersion:latest,updateAvailable:compareVersions(latest,appVersion)>0,releaseUrl:String(release.html_url||''),publishedAt:release.published_at||null,checkedAt:Date.now(),source:'GitHub Releases'};
+    const asset=(Array.isArray(release.assets)?release.assets:[]).find(a=>/^Yumeiro-d+.d+.d+.zip$/.test(String(a.name||''))&&a.browser_download_url);
+    const result={currentVersion:appVersion,latestVersion:latest,updateAvailable:compareVersions(latest,appVersion)>0,releaseUrl:String(release.html_url||''),publishedAt:release.published_at||null,checkedAt:Date.now(),source:'GitHub Releases',notes:String(release.body||'').slice(0,1500),asset:asset?{name:String(asset.name),size:Number(asset.size)||0}:null,_assetUrl:asset?String(asset.browser_download_url):''};
     updateCache={checkedAt:Date.now(),result};return result;
   }catch(error){
     const result={currentVersion:appVersion,latestVersion:null,updateAvailable:false,releaseUrl:'',publishedAt:null,checkedAt:Date.now(),source:'GitHub Releases',error:'暂时无法检查更新：'+(error.name==='TimeoutError'?'连接超时（服务器可能访问不了 GitHub）':/^HTTP 404/.test(error.message)?'GitHub 上还没有发布版本（HTTP 404）':/^HTTP /.test(error.message)?'发布源返回 '+error.message:'无法连接发布源（网络不通或被拦截）')};
@@ -2462,7 +2464,8 @@ const server=http.createServer(async(req,res)=>{
     if(pathname==='/api/admin/service-update'&&req.method==='GET'){
       if(!isAdmin)return adminOnly();
       if(url.searchParams.get('refresh')==='1')updateCache.checkedAt=0; // “检查更新”按钮：跳过 10 分钟缓存，立刻问一次 GitHub
-      return json(res,200,{...(await latestServiceUpdate()),setupCompleted:db.settings.setup?.status==='completed',nativeCommand:'cd <新版本解压出来的目录> && sudo bash deploy/yumeiro-native.sh update',dockerCommand:'docker compose up -d --build yumeiro',message:'发布新版本后，先备份数据，再执行对应部署方式的更新；更新会重启服务。'});
+      const {_assetUrl,...latestInfo}=await latestServiceUpdate();
+      return json(res,200,{...latestInfo,setupCompleted:db.settings.setup?.status==='completed',nativeCommand:'cd <新版本解压出来的目录> && sudo bash deploy/yumeiro-native.sh update',dockerCommand:'docker compose up -d --build yumeiro',message:'发布新版本后，先备份数据，再执行对应部署方式的更新；更新会重启服务。'});
     }
     // ---- 压缩包更新：管理员上传新版发布包 + 粘贴发布页上的 SHA256，校验值对上才允许更新，不需要在服务器上敲命令 ----
     // 只在原生安装且启用了“更新助手”（yumeiro-setup-helper，root）时可用；助手会再次校验、先备份、起不来自动回滚，和命令行 update 完全一致。
@@ -2476,7 +2479,7 @@ const server=http.createServer(async(req,res)=>{
     if(pathname==='/api/admin/service-update/status'&&req.method==='GET'){
       if(!isAdmin)return adminOnly();
       const helper=await helperState();
-      return json(res,200,{available:helper.available,reason:helper.reason||'',status:helper.status,currentVersion:appVersion,pending:publicPending(await readPending())});
+      return json(res,200,{available:helper.available,reason:helper.reason||'',status:helper.status,currentVersion:appVersion,pending:publicPending(await readPending()),download:{state:updateDownload.state,version:updateDownload.version||'',received:updateDownload.received||0,total:updateDownload.total||0,error:updateDownload.error||'',startedAt:updateDownload.startedAt||0}});
     }
     if(pathname==='/api/admin/service-update/upload'&&req.method==='PUT'){
       if(!isAdmin)return adminOnly();
@@ -2503,6 +2506,49 @@ const server=http.createServer(async(req,res)=>{
         return json(res,200,{pending:publicPending(item),currentVersion:appVersion});
       }catch(error){await rm(target,{force:true}).catch(()=>{});return json(res,error.status||500,{error:error.status?error.message:'上传失败：'+error.message})}
       finally{updateUploading=false}
+    }
+    // 一键更新：管理员点一下，服务器自己从 GitHub 发布页下载服务端安装包 → 内置公钥验签 → 存成待安装包；之后和上传的包走同一个“更新”接口（备份、替换、起不来自动回滚）
+    if(pathname==='/api/admin/service-update/download-latest'&&req.method==='POST'){
+      if(!isAdmin)return adminOnly();
+      const helper=await helperState();
+      if(!helper.available)return json(res,409,{error:'这台服务器不能在网页里更新：'+helper.reason});
+      if(helper.status.state==='running')return json(res,409,{error:'已有更新正在进行'});
+      if(updateUploading||['downloading','verifying'].includes(updateDownload.state))return json(res,409,{error:'正在下载或上传另一个安装包'});
+      const body=await readBody(req);if(body.confirm!==true)return json(res,400,{error:'需要确认：更新会备份数据并重启服务'});
+      updateCache.checkedAt=0;const latest=await latestServiceUpdate();
+      if(latest.error)return json(res,502,{error:latest.error});
+      if(!latest.updateAvailable)return json(res,400,{error:'当前已经是最新版本'});
+      if(!latest._assetUrl)return json(res,400,{error:'发布页里没有找到服务端安装包（Yumeiro-x.y.z.zip），请到发布页手动下载后上传'});
+      if(latest.asset.size>UPDATE_MAX_BYTES)return json(res,413,{error:'安装包超过 '+Math.round(UPDATE_MAX_BYTES/1048576)+' MB 上限'});
+      updateUploading=true;updateDownload={state:'downloading',version:latest.latestVersion,received:0,total:latest.asset.size,startedAt:Date.now()};
+      const id=randomUUID(),file='incoming-'+id+'.zip',target=path.join(updatesDir,file),hash=createHash('sha256'),version=latest.latestVersion,startedAt=updateDownload.startedAt;
+      (async()=>{
+        try{
+          await mkdir(updatesDir,{recursive:true,mode:0o750});await dropPending();
+          let url=latest._assetUrl,response;
+          for(let hop=0;hop<5;hop++){
+            const u=new URL(url);if(u.protocol!=='https:'||!updateHostOk(u.host))throw new Error('下载地址不在允许的发布源内');
+            response=await fetch(url,{headers:{'User-Agent':'Yumeiro-Service-Update-Downloader',Accept:'application/octet-stream'},redirect:'manual',signal:AbortSignal.timeout(30*60*1000)});
+            const next=response.headers.get('location');
+            if(response.status>=300&&response.status<400&&next){url=new URL(next,url).href;await response.body?.cancel().catch(()=>{});continue}
+            break;
+          }
+          if(!response?.ok||!response.body)throw new Error('下载失败：HTTP '+(response?.status||'无响应'));
+          const counter=async function*(source){for await(const chunk of source){updateDownload.received+=chunk.length;if(updateDownload.received>UPDATE_MAX_BYTES)throw new Error('压缩包过大');hash.update(chunk);yield chunk}};
+          await pipeline(Readable.fromWeb(response.body),counter,createWriteStream(target,{mode:0o640}));
+          updateDownload.state='verifying';
+          const info=await verifySignedUpdateZip(target); // 程序自己核实官方签名和包内每个文件
+          if(info.version!==version)throw new Error('下载到的版本（'+info.version+'）和发布页（'+version+'）不一致，已丢弃');
+          const item={file,name:latest.asset.name,size:updateDownload.received,sha256:hash.digest('hex'),version:info.version,withClients:info.withClients,uploadedAt:Date.now(),by:session.user.id};
+          await writeFile(pendingFile,JSON.stringify(item),{mode:0o640});
+          addAudit(db,{userId:session.user.id,action:'service.update_downloaded',target:latest.asset.name,detail:'版本 '+info.version+' · 从发布页下载 · 官方签名验证通过',ip:clientIp(req)});await persist();
+          updateDownload={...updateDownload,state:'ready'};
+        }catch(error){
+          await rm(target,{force:true}).catch(()=>{});
+          updateDownload={state:'failed',version,startedAt,received:updateDownload.received||0,total:latest.asset.size,error:String(error.message||error).slice(0,300)};
+        }finally{updateUploading=false}
+      })();
+      return json(res,202,{started:true,version,total:latest.asset.size});
     }
     if(pathname==='/api/admin/service-update/apply'&&req.method==='POST'){
       if(!isAdmin)return adminOnly();
