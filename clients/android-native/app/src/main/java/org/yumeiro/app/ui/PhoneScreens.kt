@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -179,14 +180,62 @@ fun RemoteListScreen(vm: AppViewModel) {
     }
 }
 
+private fun android.content.Context.findActivity(): android.app.Activity? { var c = this; while (c is android.content.ContextWrapper) { if (c is android.app.Activity) return c; c = c.baseContext }; return null }
+
+@Composable
+private fun KeyChip(label: String, selected: Boolean = false, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Box(modifier.clip(RoundedCornerShape(10.dp)).background(if (selected) Accent else Soft).border(1.dp, if (selected) Accent else Line, RoundedCornerShape(10.dp)).clickable { onClick() }.padding(horizontal = 10.dp, vertical = 8.dp), Alignment.Center) {
+        Text(label, color = if (selected) Color.White else Ink, fontSize = 12.5.sp, maxLines = 1)
+    }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun KeysPanel(phone: org.yumeiro.app.PhoneState, mac: Boolean, mods: Set<String>, onMods: (Set<String>) -> Unit, key: (String, List<String>) -> Unit, scroll: (Int) -> Unit, sendText: (String) -> Unit) {
+    var text by remember { mutableStateOf("") }
+    val primary = if (mac) "meta" else "ctrl"
+    @Composable fun group(title: String, content: @Composable () -> Unit) {
+        Text(title, color = Muted, fontSize = 11.5.sp, modifier = Modifier.padding(top = 6.dp))
+        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { content() }
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        group("修饰键（先点它，再点下面的键或快捷键）") {
+            for ((label, m) in listOf("Ctrl" to "ctrl", "Alt" to "alt", "Shift" to "shift", (if (mac) "Cmd" else "Win") to "meta")) KeyChip(label, m in mods) { onMods(if (m in mods) mods - m else mods + m) }
+        }
+        group("常用快捷键") {
+            for ((label, k, m) in listOf(
+                Triple("复制", "c", listOf(primary)), Triple("粘贴", "v", listOf(primary)), Triple("剪切", "x", listOf(primary)), Triple("全选", "a", listOf(primary)),
+                Triple("撤销", "z", listOf(primary)), Triple("保存", "s", listOf(primary)), Triple("查找", "f", listOf(primary)), Triple("新标签", "t", listOf(primary)), Triple("关标签", "w", listOf(primary)),
+                Triple("刷新", "f5", emptyList()), Triple("切换窗口", "tab", listOf(if (mac) "meta" else "alt")), Triple("关闭窗口", if (mac) "q" else "f4", listOf(if (mac) "meta" else "alt")),
+            ) + (if (mac) listOf(Triple("聚焦搜索", "space", listOf("meta"))) else listOf(Triple("显示桌面", "d", listOf("meta")), Triple("任务视图", "tab", listOf("meta")), Triple("截图", "s", listOf("meta", "shift")), Triple("锁屏", "l", listOf("meta")), Triple("开始菜单", "meta", emptyList()))))
+                KeyChip(label) { key(k, m) }
+        }
+        group("按键") {
+            for ((label, k) in listOf("Enter" to "enter", "Esc" to "escape", "Tab" to "tab", "退格" to "backspace", "删除" to "delete", "空格" to "space", "←" to "left", "↑" to "up", "↓" to "down", "→" to "right", "Home" to "home", "End" to "end", "PgUp" to "pageup", "PgDn" to "pagedown"))
+                KeyChip(label) { key(k, emptyList()) }
+            for (n in 1..12) KeyChip("F$n") { key("f$n", emptyList()) }
+        }
+        group("滚动") { KeyChip("↑ 上滚") { scroll(-5) }; KeyChip("↓ 下滚") { scroll(5) } }
+        Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            OutlinedTextField(text, { text = it.take(200) }, label = { Text("要输入到电脑的文字") }, singleLine = true, modifier = Modifier.weight(1f))
+            Button(enabled = text.isNotEmpty(), onClick = { sendText(text); text = "" }, colors = ButtonDefaults.buttonColors(containerColor = Accent)) { Text("发送") }
+        }
+    }
+}
+
 @Composable
 fun RemoteViewScreen(vm: AppViewModel) {
     val phone = vm.phone; val dev = phone.device
     if (dev == null) { vm.open(Screen.Remote); return }
+    val ctx = LocalContext.current; val activity = remember { ctx.findActivity() }
+    val land = androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
     var frame by remember { mutableStateOf<ImageBitmap?>(null) }; var status by remember { mutableStateOf("正在连接…") }; var canControl by remember { mutableStateOf(dev.control) }
-    var text by remember { mutableStateOf("") }
+    var mods by remember { mutableStateOf(setOf<String>()) }
+    val mac = dev.osLabel.contains("mac", ignoreCase = true)
     fun back() { phone.stopRemote(); phone.device = null; vm.open(Screen.Remote) }
     BackHandler { back() }
+    // 离开这个页面时恢复成跟随系统的方向
+    DisposableEffect(Unit) { onDispose { activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED } }
     LaunchedEffect(dev.id) {
         var seq = 0L
         while (isActive) {
@@ -204,39 +253,53 @@ fun RemoteViewScreen(vm: AppViewModel) {
         }
     }
     fun click(x: Float, y: Float, button: String, count: Int) = phone.sendInput(listOf(JSONObject().put("type", "click").put("x", x.toDouble()).put("y", y.toDouble()).put("button", button).put("count", count)))
-    fun key(k: String) = phone.sendInput(listOf(JSONObject().put("type", "key").put("key", k)))
-    Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
-        Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+    val sendKey: (String, List<String>) -> Unit = { k, extra ->
+        val all = (mods + extra).distinct()
+        phone.sendInput(listOf(JSONObject().put("type", "key").put("key", k).put("action", "press").put("mods", org.json.JSONArray(all)))); mods = emptySet()
+    }
+    val scroll: (Int) -> Unit = { dy -> phone.sendInput(listOf(JSONObject().put("type", "wheel").put("dy", dy))) }
+    val sendText: (String) -> Unit = { t -> phone.sendInput(listOf(JSONObject().put("type", "text").put("text", t))) }
+    val rotate = { activity?.requestedOrientation = if (land) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE; Unit }
+
+    @Composable fun screenImage(maxW: androidx.compose.ui.unit.Dp, maxH: androidx.compose.ui.unit.Dp) {
+        val img = frame
+        if (img == null) { Box(Modifier.fillMaxWidth().height(160.dp), Alignment.Center) { Text(status, color = Muted) }; return }
+        val ratio = img.width.toFloat() / img.height.toFloat()
+        val w = minOf(maxW, maxH * ratio); val h = w / ratio
+        Image(img, "电脑画面", Modifier.width(w).height(h).clip(RoundedCornerShape(8.dp)).border(1.dp, Line, RoundedCornerShape(8.dp))
+            .pointerInput(canControl) {
+                if (canControl) detectTapGestures(
+                    onTap = { o -> click(o.x / size.width, o.y / size.height, "left", 1) },
+                    onDoubleTap = { o -> click(o.x / size.width, o.y / size.height, "left", 2) },
+                    onLongPress = { o -> click(o.x / size.width, o.y / size.height, "right", 1) })
+            }, contentScale = ContentScale.FillBounds)
+    }
+    @Composable fun header() {
+        Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = { back() }) { Text("← 返回", color = Ink) }
             Text(dev.name.ifBlank { "电脑" }, color = Ink, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(if (canControl) "可操作" else "仅查看", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(end = 12.dp))
+            TextButton(onClick = { rotate() }) { Text(if (land) "竖屏" else "横屏", color = Accent) }
+            Text(if (canControl) "可操作" else "仅查看", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(end = 8.dp))
         }
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            val img = frame
-            if (img != null) {
-                Image(img, "电脑画面", Modifier.fillMaxWidth().aspectRatio(img.width.toFloat() / img.height.toFloat()).clip(RoundedCornerShape(10.dp)).border(1.dp, Line, RoundedCornerShape(10.dp))
-                    .pointerInput(canControl) {
-                        if (canControl) detectTapGestures(
-                            onTap = { o -> click(o.x / size.width, o.y / size.height, "left", 1) },
-                            onDoubleTap = { o -> click(o.x / size.width, o.y / size.height, "left", 2) },
-                            onLongPress = { o -> click(o.x / size.width, o.y / size.height, "right", 1) })
-                    }, contentScale = ContentScale.FillBounds)
-            } else Box(Modifier.fillMaxWidth().height(200.dp), Alignment.Center) { Text(status, color = Muted) }
-            if (img != null && status.isNotEmpty()) Text(status, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
-            if (canControl) {
-                Text("点一下 = 单击；快速点两下 = 双击；长按 = 右键。", color = Muted, fontSize = 12.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    for ((label, k) in listOf("Enter" to "enter", "Esc" to "escape", "Tab" to "tab", "退格" to "backspace")) OutlinedButton(onClick = { key(k) }, modifier = Modifier.weight(1f)) { Text(label, fontSize = 12.sp, maxLines = 1) }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    OutlinedButton(onClick = { phone.sendInput(listOf(JSONObject().put("type", "wheel").put("dy", -5))) }, modifier = Modifier.weight(1f)) { Text("↑ 上滚", fontSize = 12.sp) }
-                    OutlinedButton(onClick = { phone.sendInput(listOf(JSONObject().put("type", "wheel").put("dy", 5))) }, modifier = Modifier.weight(1f)) { Text("↓ 下滚", fontSize = 12.sp) }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    OutlinedTextField(text, { text = it.take(200) }, label = { Text("要输入到电脑的文字") }, singleLine = true, modifier = Modifier.weight(1f))
-                    Button(enabled = text.isNotEmpty(), onClick = { phone.sendInput(listOf(JSONObject().put("type", "text").put("text", text))); text = "" }, colors = ButtonDefaults.buttonColors(containerColor = Accent)) { Text("发送") }
-                }
-            } else Text("这台电脑是“仅查看”：想操作，请在电脑网页的“远程控制”里开启控制，并用 --allow-control 启动被控端。", color = Muted, fontSize = 12.sp)
+    }
+    val hint = if (canControl) "点一下 = 单击；快速点两下 = 双击；长按 = 右键。" else "这台电脑是“仅查看”：想操作，请在电脑网页的“远程控制”里开启控制，并用 --allow-control 启动被控端。"
+    if (land) {
+        Row(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 8.dp)) {
+            androidx.compose.foundation.layout.BoxWithConstraints(Modifier.weight(1f).fillMaxSize(), Alignment.Center) { screenImage(maxWidth, maxHeight) }
+            Column(Modifier.width(250.dp).fillMaxSize().padding(start = 8.dp).verticalScroll(rememberScrollState())) {
+                header(); Text(hint, color = Muted, fontSize = 11.5.sp)
+                if (canControl) KeysPanel(phone, mac, mods, { mods = it }, sendKey, scroll, sendText)
+            }
+        }
+    } else {
+        Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 10.dp)) {
+            header()
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth(), Alignment.TopCenter) { screenImage(maxWidth, 2000.dp) }
+                if (frame != null && status.isNotEmpty()) Text(status, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                Text(hint, color = Muted, fontSize = 12.sp)
+                if (canControl) KeysPanel(phone, mac, mods, { mods = it }, sendKey, scroll, sendText)
+            }
         }
     }
 }
