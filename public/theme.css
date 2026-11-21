@@ -461,3 +461,7 @@ html .home-panel .home-panel-body,html[data-theme=dark] .home-panel .home-panel-
 .sb-fold-head{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;border-radius:8px}.sb-fold-head:hover{color:#fff}.sb-fold-caret{width:12px;font-size:11px;opacity:.8}.sb-fold-count{margin-left:auto;margin-right:8px;font-size:11px;padding:0 7px;border-radius:999px;background:rgba(255,255,255,.12)}.sb-fold-count:empty{display:none}
 .sb-folded{display:none!important}
 #groupList{max-height:22vh!important}
+
+/* 设了壁纸时，让壁纸透出来：主页的渐变底色不再盖住壁纸层 */
+body.has-wallpaper[data-page="app"] .app,html[data-theme=dark] body.has-wallpaper[data-page="app"] .app{background:transparent!important}
+html[data-theme=dark] body.has-wallpaper #prompt{background:transparent!important}
