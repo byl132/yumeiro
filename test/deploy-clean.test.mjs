@@ -72,6 +72,9 @@ cleanup_after`;
 test('升级（update）会给旧安装补上网页更新助手：令牌、环境变量、启动', () => {
   const update = script.slice(script.indexOf('\nupdate)'), script.indexOf('\nengines)'));
   assert.match(update, /setup_helper_token/); assert.match(update, /SETUP_HELPER_TOKEN_FILE=/); assert.match(update, /SETUP_HELPER_SOCKET=/);
-  assert.match(update, /enable yumeiro-setup-helper/); assert.match(update, /restart yumeiro-setup-helper/);
-  assert.ok(update.indexOf('restart yumeiro-setup-helper') < update.indexOf('systemctl start yumeiro.service'), '要在启动主服务之前把环境变量备好');
+  assert.match(update, /enable --now yumeiro-setup-helper/);
+  // 网页更新是助手拉起来的：升级脚本里不能直接重启助手（会把自己杀掉，主服务停在已停止 → 502），只能升级成功后用 systemd-run 延迟重启
+  assert.doesNotMatch(update.replace(/^\s*#.*$/gm, '').replace(/systemd-run[^\n]*/g, ''), /systemctl restart yumeiro-setup-helper/);
+  assert.match(update, /systemd-run [^\n]*systemctl restart yumeiro-setup-helper/);
+  assert.ok(update.indexOf('enable --now yumeiro-setup-helper') < update.indexOf('systemctl start yumeiro.service'), '要在启动主服务之前把环境变量备好');
 });

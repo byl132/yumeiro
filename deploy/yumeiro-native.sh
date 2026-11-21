@@ -665,13 +665,16 @@ update)
     grep -q '^SETUP_HELPER_SOCKET=' "$ENV_FILE" || echo "SETUP_HELPER_SOCKET=/run/yumeiro/setup-helper.sock" >> "$ENV_FILE"
   fi
   write_units
+  # 注意：网页更新就是这个助手拉起来的，这里绝对不能直接重启它——重启会把正在运行的这个升级脚本一起杀掉，主服务就停在“已停止”再也起不来（502）。
+  # 所以这里只“启用并确保在运行”（已经在运行就什么都不做）；换成新代码的重启放到升级成功之后，用 systemd-run 在脚本之外延迟执行。
   if [ "$WEB_SETUP" = 1 ]; then
-    systemctl enable yumeiro-setup-helper.service >/dev/null 2>&1 || true
-    systemctl restart yumeiro-setup-helper.service || warn "网页更新助手没有启动成功（不影响使用，命令行更新照常）：journalctl -u yumeiro-setup-helper -n 30"
+    systemctl enable --now yumeiro-setup-helper.service >/dev/null 2>&1 || warn "网页更新助手没有启动成功（不影响使用，命令行更新照常）：journalctl -u yumeiro-setup-helper -n 30"
   fi
   systemctl start yumeiro.service; [ "$WITH_RUNNER" = 1 ] && systemctl start yumeiro-runner.service
   if health 60; then ok "升级完成（版本 $(node -p "require('$APP_DIR/package.json').version")）。需要回退时备份在 $PRE"
     maybe_upload_clients; hint_clients
+    # 升级成功后，让网页更新助手也换成新代码：用 systemd-run 在这个脚本之外、15 秒后再重启（不会杀掉自己）
+    [ "$WEB_SETUP" = 1 ] && command -v systemd-run >/dev/null 2>&1 && systemd-run --quiet --on-active=15 --unit="yumeiro-helper-reload-$(date +%s)" systemctl restart yumeiro-setup-helper.service >/dev/null 2>&1 || true
     cleanup_after
   else
     warn "新版本没有起来，正在回滚…"
