@@ -223,6 +223,43 @@ class ApiClient(private val session: Session) {
         } catch (e: ApiException) { throw e } catch (e: Exception) { throw ApiException(if (handle.cancelled) "已取消" else explain(e)) } finally { conn.disconnect() }
     }
 
+    /** 远程控制的一帧画面：204 表示暂时没有新画面。 */
+    class Frame(val status: Int, val seq: Long, val bytes: ByteArray?, val online: Boolean, val control: Boolean)
+
+    fun remoteFrame(id: String, since: Long): Frame {
+        val conn = open("/api/remote/devices/$id/frame?since=$since", "GET", 25000)
+        try {
+            val status = conn.responseCode
+            remember(conn)
+            if (status == 401) throw ApiException("登录已过期，请重新登录", 401)
+            val online = conn.getHeaderField("X-Online") == "1"; val control = conn.getHeaderField("X-Control") == "1"
+            if (status == 204) return Frame(204, since, null, online, control)
+            if (status !in 200..299) { val msg = runCatching { JSONObject(readAll(conn.errorStream)).optString("error") }.getOrNull().orEmpty(); throw ApiException(msg.ifBlank { "读取画面失败（HTTP $status）" }, status) }
+            val data = conn.inputStream.use { it.readBytes() }
+            return Frame(200, conn.getHeaderField("X-Seq")?.toLongOrNull() ?: since, data, online, control)
+        } catch (e: ApiException) { throw e } catch (e: Exception) { throw ApiException(explain(e)) } finally { conn.disconnect() }
+    }
+
+    /** 把手机里的文件传到工作区（覆盖同名文件前，服务器会自动备份旧的）。 */
+    fun uploadToWorkspace(workspaceId: String, path: String, data: ByteArray, onProgress: (Long, Long) -> Unit) {
+        val conn = open("/api/workspaces/$workspaceId/upload?path=" + java.net.URLEncoder.encode(path, "UTF-8"), "PUT", 10 * 60 * 1000)
+        conn.doOutput = true
+        conn.setRequestProperty("Content-Type", "application/octet-stream")
+        conn.setFixedLengthStreamingMode(data.size)
+        try {
+            conn.outputStream.use { out ->
+                var sent = 0; val chunk = 16 * 1024
+                while (sent < data.size) { val n = minOf(chunk, data.size - sent); out.write(data, sent, n); sent += n; onProgress(sent.toLong(), data.size.toLong()) }
+                out.flush()
+            }
+            val status = conn.responseCode
+            remember(conn)
+            val reply = Reply(status, readAll(if (status >= 400) conn.errorStream else conn.inputStream))
+            if (status == 401) throw ApiException("登录已过期，请重新登录", 401)
+            if (!reply.ok) throw ApiException(reply.error("上传失败（HTTP $status）"), status)
+        } catch (e: ApiException) { throw e } catch (e: Exception) { throw ApiException(explain(e)) } finally { conn.disconnect() }
+    }
+
     private fun explain(e: Exception): String = when {
         e is javax.net.ssl.SSLHandshakeException || e.cause is java.security.cert.CertificateException -> "服务器的证书不被信任（自签名证书常见）。确认是自己的服务器后，在登录页勾选“忽略证书错误”。"
         e is javax.net.ssl.SSLException -> "这个地址不支持 HTTPS。如果服务器是 http 的，请在地址前面写上 http://"

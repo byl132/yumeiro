@@ -143,6 +143,8 @@
     b.addEventListener('click', () => linkDialog(chat)); crumb.append(b);
     const r = document.createElement('button'); r.type = 'button'; r.className = 'crumb-link'; r.textContent = '✎ 重命名'; r.title = '自己给这段聊天起名（起过名就不会再被 AI 自动改掉）';
     r.addEventListener('click', () => window.yumeiroRename?.(chat)); crumb.append(r);
+    const ph = document.createElement('button'); ph.type = 'button'; ph.className = 'crumb-link'; ph.textContent = '📱 发到手机'; ph.title = '生成二维码，用手机扫一扫就能接着聊这一段';
+    ph.addEventListener('click', () => window.ymPhoneQr?.(location.origin + '/?open=chat:' + encodeURIComponent(chat.id), chat.title || '这段对话')); crumb.append(ph);
   }
   const crumbEl = () => $('#crumb');
   const crumbTimer = setInterval(() => { const c = crumbEl(); if (!c) return; clearInterval(crumbTimer); new MutationObserver(() => { if (!c.querySelector('.crumb-link')) decorateCrumb(); }).observe(c, { childList: true }); decorateCrumb(); }, 500);
@@ -171,4 +173,31 @@
     return !!recent && !!groupList;
   }
   let foldTries = 0; const foldTimer = setInterval(() => { if (mountFolds() || ++foldTries > 60) clearInterval(foldTimer); }, 500);
+
+  // ---------- 5. 发到手机：二维码弹层 + 扫码后打开对应对话 / 工作区 ----------
+  window.ymPhoneQr = (link, title) => {
+    document.querySelector('.ym-qr-back')?.remove();
+    const back = document.createElement('div'); back.className = 'ym-qr-back';
+    const box = document.createElement('div'); box.className = 'ym-qr-box'; box.setAttribute('role', 'dialog'); box.setAttribute('aria-modal', 'true');
+    const h = document.createElement('div'); h.className = 'ym-qr-title'; h.textContent = '发到手机：' + title;
+    const img = document.createElement('img'); img.className = 'ym-qr-img'; img.alt = '二维码'; img.src = '/api/qr?text=' + encodeURIComponent(link);
+    const tip = document.createElement('div'); tip.className = 'ym-qr-tip'; tip.textContent = '用 Yumeiro 手机软件的“扫一扫”扫描，会直接打开这里。也可以用手机相机扫，用浏览器打开（需要先在手机浏览器里登录同一个账号）。';
+    const url = document.createElement('input'); url.className = 'ym-qr-url'; url.readOnly = true; url.value = link; url.addEventListener('focus', () => url.select());
+    const close = document.createElement('button'); close.type = 'button'; close.className = 'ym-qr-close'; close.textContent = '关闭';
+    const off = () => { back.remove(); removeEventListener('keydown', key, true); }, key = e => { if (e.key === 'Escape') { e.stopPropagation(); off(); } };
+    close.addEventListener('click', off); back.addEventListener('pointerdown', e => { if (e.target === back) off(); }); addEventListener('keydown', key, true);
+    box.append(h, img, tip, url, close); back.append(box); document.body.append(back); close.focus();
+  };
+  (function openFromLink() {
+    const params = new URLSearchParams(location.search), target = params.get('open'); if (!target) return;
+    let tries = 0; const timer = setInterval(async () => {
+      if (++tries > 60) return clearInterval(timer);
+      if ($('#app')?.hidden !== false || !window.yumeiroSelectChat) return;
+      clearInterval(timer);
+      const [kind, id] = target.split(':');
+      params.delete('open'); history.replaceState(null, '', location.pathname + (params.toString() ? '?' + params : '') + location.hash);
+      if (kind === 'chat' && id) window.yumeiroSelectChat(id);
+      else if (kind === 'workspace' && id) { try { const d = await (await fetch('/api/workspaces', { credentials: 'same-origin' })).json(); const w = (d.workspaces || []).find(x => x.id === id); if (w) window.YumeiroWS?.open(w, d.runner); } catch { /* 忽略 */ } }
+    }, 500);
+  })();
 })();

@@ -916,7 +916,7 @@
     const tabDefs = [...(runnerOn ? [['files', '文件与项目', secFiles]] : []), ['chats', '对话与资源', secChats], ['tasks', '多智能体协作', secTasks], ['share', '共享与成员', secShare]];
     const tabBtns = tabDefs.map(([id, label]) => el('button', { type: 'button', class: 'ws-tab', textContent: label, on: { click: () => pickTab(id) } }));
     const pickTab = id => tabDefs.forEach(([tid, , sec], k) => { sec.hidden = tid !== id; tabBtns[k].classList.toggle('on', tid === id); });
-    body.append(back, el('div', { class: 'ws-head' }, el('h3', { textContent: w.name, style: 'margin:0' }), badge), el('div', { class: 'ws-tabs' }, ...tabBtns));
+    body.append(back, el('div', { class: 'ws-head' }, el('h3', { textContent: w.name, style: 'margin:0' }), badge, el('button', { type: 'button', class: 'secondary', textContent: '📱 发到手机', title: '生成二维码，用手机软件扫一扫打开这个工作区', style: 'margin-left:auto', on: { click: () => window.ymPhoneQr?.(location.origin + '/?open=workspace:' + encodeURIComponent(w.id), w.name) } })), el('div', { class: 'ws-tabs' }, ...tabBtns));
 
     if (w.canManage ?? (w.mine || me.role === 'admin')) {
       const memberPanel = el('div', {}), search = el('input', { placeholder: '输入用户名或邮箱搜索成员（至少 2 个字符）', class: 'wide' }), results = el('div', {}), memberList = el('div', { class: 'workspace-members' });

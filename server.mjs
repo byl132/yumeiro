@@ -713,6 +713,13 @@ async function streamModel(messages,onDelta,signal,ref=defaultModelRef(),system=
   return {reply,usage,aborted};
 }
 const busyConversations=new Set();
+// 给手机软件的通知事件：每个用户在内存里保留最近 50 条（重启后清空），手机用 /api/events 长轮询读取
+const userEvents=new Map();
+function pushUserEvent(userId,event){
+  let box=userEvents.get(userId);if(!box){box={seq:0,list:[],waiters:new Set()};userEvents.set(userId,box)}
+  const item={seq:++box.seq,at:Date.now(),...event};box.list.push(item);if(box.list.length>50)box.list.shift();
+  for(const wake of [...box.waiters])wake();
+}
 // 用量聚合：按成员 → 月/日累计，不受 db.usage 明细上限（10000 条）影响。时间按服务器本地时区。
 const pad=n=>String(n).padStart(2,'0');
 const monthKey=(at=Date.now())=>{const d=new Date(at);return d.getFullYear()+'-'+pad(d.getMonth()+1)};
@@ -3056,6 +3063,24 @@ const server=http.createServer(async(req,res)=>{
       addAudit(db,{userId:session.user.id,action:'guide.save',target:workspace.name,detail:files.length+' 个文件（同名旧文件已备份）',ip:clientIp(req)});await persist();
       return json(res,200,{workspaceId:workspace.id,name:workspace.name,saved:files.length,hasIndex:files.some(file=>file.path==='index.html')});
     }
+    // ---- 手机联动：通知事件（长轮询）与二维码 ----
+    if(pathname==='/api/events'&&req.method==='GET'){
+      const sinceRaw=url.searchParams.get('since'),first=sinceRaw===null||!(Number(sinceRaw)>=0),since=first?0:Number(sinceRaw),wait=Math.min(25,Math.max(0,Number(url.searchParams.get('wait'))||0));
+      const box=userEvents.get(session.user.id)||{seq:0,list:[],waiters:new Set()};
+      if(!userEvents.has(session.user.id))userEvents.set(session.user.id,box);
+      // 手机第一次来（不带 since 或 since<0）只告诉它当前序号，不把历史通知一次性推给它
+      if(first)return json(res,200,{seq:box.seq,events:[]});
+      const fresh=()=>box.list.filter(item=>item.seq>since);
+      if(fresh().length||!wait)return json(res,200,{seq:box.seq,events:fresh()});
+      await new Promise(resolve=>{const done=()=>{clearTimeout(timer);box.waiters.delete(done);resolve()},timer=setTimeout(done,wait*1000);box.waiters.add(done);req.on('close',done)});
+      return json(res,200,{seq:box.seq,events:fresh()});
+    }
+    if(pathname==='/api/qr'&&req.method==='GET'){
+      const text=String(url.searchParams.get('text')||'');
+      if(!text||text.length>800||!/^https?:\/\//i.test(text))return json(res,400,{error:'二维码内容不合法'});
+      const svg=await QRCode.toString(text,{type:'svg',margin:1,errorCorrectionLevel:'M'});
+      res.writeHead(200,{'Content-Type':'image/svg+xml; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(svg);
+    }
     // ---- 工作区的对话与资源：关联聊天、在工作区里直接开对话、引入已有的智能体 / 技能 / 机器人 ----
     const libraryMatch=pathname.match(/^\/api\/workspaces\/([0-9a-f-]+)\/library$/i);
     if(libraryMatch){
@@ -3250,8 +3275,10 @@ const server=http.createServer(async(req,res)=>{
         try{
           const result=await runCollaboration({task,mode,participants,rounds,maxSteps,call,signal:abort.signal,emit:event=>{const{type,...data}=event;send(type,data)}});
           run.status=result.status;run.final=result.final;run.steps=result.steps;
+          pushUserEvent(run.userId,{type:'run',title:'协作任务完成',body:String(run.task||'').replace(/\s+/g,' ').slice(0,60),workspaceId:run.workspaceId,runId:run.id,ok:result.status==='done'||result.status==='completed'});
         }catch(error){
           run.status='failed';run.error=error.message;run.steps=error.steps||run.steps;run.final=error.partial||'';
+          pushUserEvent(run.userId,{type:'run',title:'协作任务失败',body:String(run.task||'').replace(/\s+/g,' ').slice(0,60)+'：'+String(error.message||'').slice(0,60),workspaceId:run.workspaceId,runId:run.id,ok:false});
           if((error.status||500)>=500)console.error('协作任务失败：',error.message);
           send('error',{error:error.message});
         }finally{

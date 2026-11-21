@@ -57,7 +57,7 @@ import org.yumeiro.app.SkillItem
 import org.yumeiro.app.Screen
 
 @Composable
-private fun Page(title: String, onBack: () -> Unit, actions: @Composable () -> Unit = {}, content: @Composable () -> Unit) {
+internal fun Page(title: String, onBack: () -> Unit, actions: @Composable () -> Unit = {}, content: @Composable () -> Unit) {
     BackHandler { onBack() }
     Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -70,7 +70,7 @@ private fun Page(title: String, onBack: () -> Unit, actions: @Composable () -> U
 }
 
 @Composable
-private fun Item(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+internal fun Item(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Column(modifier.fillMaxWidth().background(Glass, RoundedCornerShape(16.dp)).border(1.dp, Line, RoundedCornerShape(16.dp)).padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) { content() }
 }
 

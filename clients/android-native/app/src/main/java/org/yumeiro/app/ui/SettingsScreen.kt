@@ -142,6 +142,7 @@ fun SettingsScreen(vm: AppViewModel) {
                 PickRow("默认模型", vm.models.firstOrNull { it.ref == vm.selectedModel }?.label ?: "未选择") { picker = "model" }
                 PickRow("新对话用的智能体", vm.agents.firstOrNull { it.id == vm.selectedAgent }?.name ?: "不使用") { picker = "agent" }
             }
+            PhoneLinkCard(vm)
             Card("更多") {
                 for ((label, hint, target) in listOf(Triple("智能体", "新建、编辑、选择", Screen.Agents), Triple("技能", "自己写，或从市场安装", Screen.Skills), Triple("技能市场", "浏览并一键安装", Screen.Market)) + (if (vm.isAdmin) listOf(Triple("网页找回密码确认", "输入网页上的验证码，批准或拒绝", Screen.Security), Triple("管理", "成员、用量、MCP 开关", Screen.Admin)) else emptyList()))
                     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { vm.open(target) }.padding(vertical = 10.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {

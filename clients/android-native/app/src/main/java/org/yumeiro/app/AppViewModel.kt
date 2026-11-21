@@ -60,12 +60,13 @@ class Pending(val name: String, val image: Boolean, val size: Long, val thumb: B
     val done get() = id.isNotEmpty()
 }
 
-enum class Screen { Loading, Login, Chat, Settings, Agents, Skills, Market, Admin, Security, Groups, GroupChat, GroupEdit }
+enum class Screen { Loading, Login, Chat, Settings, Agents, Skills, Market, Admin, Security, Groups, GroupChat, GroupEdit, Scan, Transfer, Remote, RemoteView }
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     val session = Session(app)
     internal val api = ApiClient(session)
     val group = GroupState(this)
+    val phone = PhoneState(this)
 
     var screen by mutableStateOf(Screen.Loading); private set
     var loginBusy by mutableStateOf(false); private set
@@ -168,7 +169,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun enterApp() {
         screen = Screen.Chat
-        loadConvs(); loadModels(); loadConfig(); loadUsage(); loadAgents(); loadMemories(); loadWallpaperPrefs(); loadWorkspaces()
+        loadConvs(); loadModels(); loadConfig(); loadUsage(); loadAgents(); loadMemories(); loadWallpaperPrefs(); loadWorkspaces(); phone.init()
         if (isAdmin) loadServiceUpdate()
     }
 

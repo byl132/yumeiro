@@ -119,6 +119,10 @@ fun AppRoot(vm: AppViewModel) {
                 Screen.Groups -> GroupsScreen(vm)
                 Screen.GroupChat -> GroupChatScreen(vm)
                 Screen.GroupEdit -> GroupEditScreen(vm)
+                Screen.Scan -> ScanScreen(vm)
+                Screen.Transfer -> TransferScreen(vm)
+                Screen.Remote -> RemoteListScreen(vm)
+                Screen.RemoteView -> RemoteViewScreen(vm)
             }
             if (vm.toast.isNotEmpty()) {
                 LaunchedEffect(vm.toast) { kotlinx.coroutines.delay(3200); vm.toast = "" }
@@ -163,7 +167,7 @@ fun ChatScreen(vm: AppViewModel) {
     ModalNavigationDrawer(drawerState = drawer, drawerContent = {
         ModalDrawerSheet(drawerContainerColor = DrawerBg, modifier = Modifier.widthIn(max = 320.dp)) {
             Sidebar(vm, onPick = { id -> scope.launch { drawer.close() }; vm.openConv(id) }, onNew = { scope.launch { drawer.close() }; vm.newChat() }, onDelete = { deleting = it },
-                onSettings = { scope.launch { drawer.close() }; vm.openSettings() })
+                onSettings = { scope.launch { drawer.close() }; vm.openSettings() }, onNavigate = { t -> scope.launch { drawer.close() }; vm.open(t) })
         }
     }) {
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
@@ -180,9 +184,13 @@ fun ChatScreen(vm: AppViewModel) {
 }
 
 @Composable
-private fun Sidebar(vm: AppViewModel, onPick: (String) -> Unit, onNew: () -> Unit, onDelete: (Conv) -> Unit, onSettings: () -> Unit) {
+private fun Sidebar(vm: AppViewModel, onPick: (String) -> Unit, onNew: () -> Unit, onDelete: (Conv) -> Unit, onSettings: () -> Unit, onNavigate: (Screen) -> Unit) {
     Column(Modifier.fillMaxHeight().statusBarsPadding().padding(12.dp)) {
         Button(onClick = onNew, modifier = Modifier.fillMaxWidth().height(46.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Soft, contentColor = Ink)) { Icon(Icons.Default.Add, null); Spacer(Modifier.size(8.dp)); Text("新建对话") }
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            for ((label, target) in listOf("扫一扫" to Screen.Scan, "传文件" to Screen.Transfer, "远程" to Screen.Remote))
+                Box(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(Soft).clickable { onNavigate(target) }.padding(vertical = 9.dp), Alignment.Center) { Text(label, color = Ink, fontSize = 13.sp) }
+        }
         Spacer(Modifier.height(8.dp))
         LazyColumn(Modifier.weight(1f)) {
             for ((label, list) in vm.grouped()) {
