@@ -655,7 +655,20 @@ update)
   sync_code
   [ "$OLD_LOCK" = "$(sha256sum "$APP_DIR/package-lock.json" | cut -d' ' -f1)" ] && [ -d "$APP_DIR/node_modules" ] || npm_install
   if [ "$WITH_RUNNER" = 1 ] && [ "$NO_ENGINES" != 1 ]; then install_engines || warn "引擎升级没有全部成功，不影响服务；稍后可执行：sudo $0 engines"; fi
+  # 旧版本装的服务器没有“网页更新助手”：补上令牌和环境变量，并把它启动起来，之后管理员就能在网页里上传压缩包更新（不用再敲命令）
+  if [ "$WEB_SETUP" = 1 ]; then
+    if [ ! -s "$SECRETS_DIR/setup_helper_token" ]; then
+      ( umask 077; openssl rand -hex 32 > "$SECRETS_DIR/setup_helper_token" )
+      chown root:yumeiro "$SECRETS_DIR/setup_helper_token"; chmod 640 "$SECRETS_DIR/setup_helper_token"
+    fi
+    grep -q '^SETUP_HELPER_TOKEN_FILE=' "$ENV_FILE" || echo "SETUP_HELPER_TOKEN_FILE=$SECRETS_DIR/setup_helper_token" >> "$ENV_FILE"
+    grep -q '^SETUP_HELPER_SOCKET=' "$ENV_FILE" || echo "SETUP_HELPER_SOCKET=/run/yumeiro/setup-helper.sock" >> "$ENV_FILE"
+  fi
   write_units
+  if [ "$WEB_SETUP" = 1 ]; then
+    systemctl enable yumeiro-setup-helper.service >/dev/null 2>&1 || true
+    systemctl restart yumeiro-setup-helper.service || warn "网页更新助手没有启动成功（不影响使用，命令行更新照常）：journalctl -u yumeiro-setup-helper -n 30"
+  fi
   systemctl start yumeiro.service; [ "$WITH_RUNNER" = 1 ] && systemctl start yumeiro-runner.service
   if health 60; then ok "升级完成（版本 $(node -p "require('$APP_DIR/package.json').version")）。需要回退时备份在 $PRE"
     maybe_upload_clients; hint_clients
