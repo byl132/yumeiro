@@ -149,3 +149,7 @@ input[type=range]{accent-color:#7d9bff;width:210px}
 .foot{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--muted);font-size:12px}
 .sect.closed .chev{transform:rotate(-90deg)}
 .pill[hidden]{display:none}.pill.runner{color:#aeb3c6}
+
+/* 首页的人物和问候靠左，和下面输入框的左边缘对齐（和网页版一致）；侧栏对话标题也靠左 */
+.hello{max-width:880px;text-align:left;padding:0}.hello img{display:block}.sugs button{text-align:left}
+.conv{align-items:stretch}.conv,.conv .row1,.conv .t,.conv .sub{text-align:left}

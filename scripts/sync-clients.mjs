@@ -9,4 +9,7 @@ mkdirSync(target, { recursive: true });
 copyFileSync(path.join(root, 'public', 'pet.js'), path.join(target, 'pet.js'));
 copyFileSync(path.join(root, 'public', 'pet-sense.js'), path.join(target, 'pet-sense.js'));   // 客户端自己的主界面（app.html）里的桌宠要用它理解对话情绪
 for (const name of ['idle', 'blink', 'happy', 'sleepy', 'walk1', 'walk2', 'walk3', 'walk4', 'peek', 'sit', 'angry1', 'angry2', 'sad1', 'sad2', 'laugh1', 'laugh2', 'surprised', 'shy']) copyFileSync(path.join(root, 'public', 'pet', name + '.png'), path.join(target, name + '.png'));
-console.log('已同步到 clients/windows/pet');
+// 远程被控端程序：客户端自带一份，设置里一开就能用（不用另外装 Node.js）
+mkdirSync(path.join(root, 'clients', 'windows', 'agent'), { recursive: true });
+copyFileSync(path.join(root, 'public', 'agent.mjs'), path.join(root, 'clients', 'windows', 'agent', 'agent.mjs'));
+console.log('已同步到 clients/windows/pet 和 clients/windows/agent');

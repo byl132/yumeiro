@@ -27,6 +27,9 @@ contextBridge.exposeInMainWorld('yumeiroApp', {
   // 自绘标题栏：设置标题（可带“⋯”更多按钮）；标题栏按钮（侧栏 / 后退 / 前进 / 更多）点击后回调
   setTitle: (text, more) => { const t = document.querySelector('#ymTitlebar .ymtitle'), m = document.querySelector('#ymTitlebar .ymmore'); if (t) t.textContent = String(text || ''); if (m) m.hidden = !more; },
   onChrome: callback => { chromeListeners.push(callback); },
+  remoteGet: () => ipcRenderer.invoke('remote:get'),
+  remoteSet: patch => ipcRenderer.invoke('remote:set', patch),
+  remoteUnpair: () => ipcRenderer.invoke('remote:unpair'),
   petGet: () => ipcRenderer.invoke('app:pet-get'),
   petSet: patch => ipcRenderer.invoke('app:pet-set', patch),
   version: () => ipcRenderer.invoke('app:version'),

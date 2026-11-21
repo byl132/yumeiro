@@ -623,9 +623,10 @@
     pet: '<svg viewBox="0 0 16 16"><circle cx="5" cy="5.5" r="1.3"/><circle cx="11" cy="5.5" r="1.3"/><circle cx="3" cy="9" r="1.2"/><circle cx="13" cy="9" r="1.2"/><path d="M8 7.5c-2.2 0-3.8 2-3.8 3.6 0 1.2 1 1.7 2 1.7.7 0 1.2-.3 1.8-.3s1.1.3 1.8.3c1 0 2-.5 2-1.7C11.8 9.5 10.2 7.5 8 7.5z"/></svg>',
     model: '<svg viewBox="0 0 16 16"><path d="M8 2 13.5 5v6L8 14 2.5 11V5zM8 8v6M2.5 5 8 8l5.5-3"/></svg>',
     usage: '<svg viewBox="0 0 16 16"><path d="M3 13V8M7 13V4M11 13V6M14 13H2"/></svg>',
+    remote: '<svg viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="8" rx="1.4"/><path d="M5.5 14h5M8 11v3"/></svg>',
     about: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.6"/><path d="M8 7.2v3.4M8 5.2v.2"/></svg>'
   };
-  const SET_ITEMS = [['general', '通用'], ['appearance', '外观'], ['pet', '桌宠'], ['model', '模型'], ['usage', '用量'], ['about', '关于']];
+  const SET_ITEMS = [['general', '通用'], ['appearance', '外观'], ['pet', '桌宠'], ['remote', '远程被控'], ['model', '模型'], ['usage', '用量'], ['about', '关于']];
   const sw = (on, fn) => { const b = h('button', 'switch' + (on ? ' on' : '')); b.type = 'button'; b.setAttribute('role', 'switch'); b.onclick = async () => { const v = !b.classList.contains('on'); b.classList.toggle('on', v); try { await fn(v); } catch (x) { b.classList.toggle('on', !v); toast(x.message); } }; return b; };
   const setRow = (title, desc, control) => h('div', 'set-row', h('div', 'txt', h('b', '', title), desc ? h('small', '', desc) : null), control);
   const selectOf = (opts, value, fn) => { const s = h('select'); for (const [v, l] of opts) { const o = h('option', '', l); o.value = v; s.append(o); } s.value = value; s.onchange = () => fn(s.value); return s; };
@@ -690,6 +691,25 @@
       col.append(h('div', 'set-h', '智能理解'), h('div', 'set-card',
         setRow('AI 台词与情绪理解', '让模型帮她想台词、判断你的情绪（会消耗模型额度）', sw(Boolean(pet.aiLines), v => set({ aiLines: v }))),
         setRow('识别表情图片', '你发表情包时用看图模型理解它（会消耗额度）', sw(pet.sticker !== false, v => set({ sticker: v })))));
+    } else if (section === 'remote') {
+      const card = h('div', 'set-card'), note = h('div', 'empty-state'), logBox = h('pre', ''); logBox.style.cssText = 'margin:8px 0 0;padding:8px 10px;max-height:150px;overflow:auto;font-size:11.5px;line-height:1.5;white-space:pre-wrap;opacity:.75;border-radius:10px;background:#00000026';
+      const STATUS = { stopped: '已关闭', starting: '正在启动…', pairing: '正在配对…', online: '✅ 已连接，手机和网页能看到这台电脑', reconnecting: '⚠ 连接中断，正在重试', error: '⚠ 出错' };
+      col.append(h('div', 'set-h', '远程被控（让手机 / 网页远程查看和操控这台电脑）'), card, note);
+      let timer = 0;
+      const draw = async () => {
+        if (lastSettingsSection !== 'remote' || !document.body.contains(card)) { clearInterval(timer); return; }
+        let st; try { st = await app.remoteGet(); } catch (x) { card.replaceChildren(h('div', 'empty-state', '读取状态失败：' + x.message)); return; }
+        const unpair = h('button', 'ghost-btn', '取消配对'); unpair.type = 'button'; unpair.disabled = !st.paired;
+        unpair.onclick = async () => { if (!confirm('取消配对后，这台电脑会从手机和网页的“远程控制”列表里消失，需要时再重新开启。确定吗？')) return; await app.remoteUnpair(); draw(); };
+        card.replaceChildren(
+          setRow('开启远程被控', '打开后，这台电脑只会向你的服务器发起连接（不用开放端口）；第一次打开会自动配对，不用输入配对码', sw(st.enabled, async v => { await app.remoteSet({ enabled: v }); draw(); })),
+          setRow('当前状态', '', h('span', '', (STATUS[st.status] || st.status) + (st.note ? '：' + st.note : ''))),
+          setRow('允许手机操作', '关闭时手机和网页只能看画面，不能点击和输入文字；改完会自动重连一次', sw(st.control, async v => { await app.remoteSet({ control: v }); draw(); })),
+          setRow('这台电脑', st.paired ? '已配对，设备名：' + st.deviceName : '还没有配对（打开上面的开关会自动配对）', unpair));
+        note.textContent = '怎么用：手机软件登录同一个服务器、同一个账号，进入“远程操控电脑”，就能看到这台电脑并操作；也可以在网页的“远程控制”里用。被控端随客户端运行：关闭窗口会收起到托盘继续运行，从托盘菜单退出才会停止。Windows 的锁屏和 UAC 弹窗界面系统不允许远程操作。';
+        logBox.textContent = (st.log || []).join('\n'); if (st.log && st.log.length && !card.contains(logBox)) card.append(logBox);
+      };
+      draw(); timer = setInterval(draw, 2000);
     } else if (section === 'model') {
       const pinned = (() => { try { return localStorage.getItem('ym.defaultModel') || ''; } catch { return ''; } })();
       const opts = models.map(m => [m.ref, (m.label || m.model || m.ref) + (m.providerName ? ' · ' + m.providerName : '')]);

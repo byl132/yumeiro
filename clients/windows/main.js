@@ -53,7 +53,7 @@ function open() {
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/i.test(url)) shell.openExternal(url); return { action: 'deny' }; });
   win.webContents.on('will-navigate', (event, url) => { const mine = serverOrigin(); if (mine && !url.startsWith(mine) && !url.startsWith('file:')) { event.preventDefault(); if (/^https?:/i.test(url)) shell.openExternal(url); } });
   // 桌宠开着时，点关闭只是收起到托盘；真正退出用托盘菜单或“Yumeiro → 退出”
-  win.on('close', event => { if (!quitting && petEnabled() && tray) { event.preventDefault(); win.hide(); } });
+  win.on('close', event => { if (!quitting && (petEnabled() || remote.enabled()) && tray) { event.preventDefault(); win.hide(); } });
   win.on('closed', () => { win = null; });
   win.on('maximize', () => { try { win.webContents.send('win:state', true); } catch { /* 窗口正在关闭 */ } });
   win.on('unmaximize', () => { try { win.webContents.send('win:state', false); } catch { /* 窗口正在关闭 */ } });
@@ -173,6 +173,7 @@ function buildMenus() {
   ]));
   if (tray) tray.setContextMenu(Menu.buildFromTemplate([
     { label: '打开 Yumeiro Open', click: showMain }, petItem,
+    { label: '远程被控（手机可看 / 操控这台电脑）', type: 'checkbox', checked: remote.enabled(), click: item => remote.setEnabled(item.checked) },
     { label: '开机自启 Start with Windows', type: 'checkbox', checked: app.getLoginItemSettings().openAtLogin, click: item => app.setLoginItemSettings({ openAtLogin: item.checked }) },
     { type: 'separator' }, { label: '退出 Quit', click: () => { quitting = true; app.quit(); } }
   ]));
@@ -347,7 +348,7 @@ async function csrfToken(force) {
   const r = await request('GET', s + '/api/auth/session', undefined, 8000);
   csrfCache = (r.data && r.data.csrfToken) || ''; return csrfCache;
 }
-ipcMain.handle('app:api', async (event, method, apiPath, json) => {
+async function apiCall(method, apiPath, json) {
   const s = serverOrigin(); method = String(method || 'GET').toUpperCase();
   if (!s) return { status: 0, error: '还没有配置服务器' };
   if (!String(apiPath).startsWith('/api/') || !['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) return { status: 0, error: '不支持的请求' };
@@ -356,7 +357,19 @@ ipcMain.handle('app:api', async (event, method, apiPath, json) => {
   if (r.status === 403 && method !== 'GET') r = await send(true);
   if (r.status === 401) csrfCache = '';
   return r;
+}
+ipcMain.handle('app:api', (event, method, apiPath, json) => apiCall(method, apiPath, json));
+
+// ── 远程被控端：让这台电脑可以被自己的手机 / 网页远程查看和操控（开关、自动配对、取消配对都在设置里）
+const remote = require('./remote-agent')({ readConfig, patchConfig, serverOrigin, api: apiCall, onChange: () => buildMenus() });
+ipcMain.handle('remote:get', () => remote.state());
+ipcMain.handle('remote:set', async (event, patch) => {
+  const p = patch || {};
+  if (typeof p.control === 'boolean') await remote.setControl(p.control);
+  if (typeof p.enabled === 'boolean') await remote.setEnabled(p.enabled);
+  return remote.state();
 });
+ipcMain.handle('remote:unpair', () => remote.unpair());
 ipcMain.handle('app:file', (event, apiPath) => new Promise(resolve => {      // 壁纸等需要登录的图片：取回来变成 data: 地址给页面用
   const s = serverOrigin(); if (!s || !String(apiPath).startsWith('/api/')) { resolve(''); return; }
   const req = net.request({ method: 'GET', url: s + apiPath, session: session.defaultSession, useSessionCookies: true, redirect: 'error' });
@@ -487,7 +500,7 @@ if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on('second-instance', showMain);
   app.on('before-quit', event => {
-    quitting = true;
+    quitting = true; remote.stop();
     // 退出前先让桌宠向你道别、走出屏幕（约 2.8 秒），再真正退出；环境变量 YUMEIRO_NO_EXIT_ANIM=1 可跳过
     if (exitDone || exiting || !pet || pet.isDestroyed() || !pet.isVisible() || process.env.YUMEIRO_NO_EXIT_ANIM) return;
     event.preventDefault(); exiting = true;
@@ -516,7 +529,8 @@ else {
     session.defaultSession.setPermissionRequestHandler((wc, permission, callback) => callback(['media', 'clipboard-read', 'clipboard-sanitized-write', 'fullscreen'].includes(permission)));
     makeTray(); buildMenus(); open();
     if (petEnabled()) showPet();
+    if (remote.enabled()) setTimeout(() => remote.start(), 1500);   // 上次开着被控端，这次随客户端自动恢复
     app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) open(); });
   });
-  app.on('window-all-closed', () => { if (process.platform !== 'darwin' && !(tray && petEnabled())) app.quit(); });
+  app.on('window-all-closed', () => { if (process.platform !== 'darwin' && !(tray && (petEnabled() || remote.enabled()))) app.quit(); });
 }

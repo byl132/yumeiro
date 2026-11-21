@@ -1,7 +1,7 @@
 {
   "name": "yumeiro-desktop",
   "productName": "Yumeiro",
-  "version": "0.12.7",
+  "version": "0.13.0",
   "description": "Yumeiro desktop client",
   "author": "Yumeiro",
   "main": "main.js",
@@ -21,6 +21,8 @@
     "copyright": "Yumeiro",
     "files": [
       "main.js",
+      "remote-agent.js",
+      "agent/**",
       "preload.js",
       "pet-preload.js",
       "pet.html",

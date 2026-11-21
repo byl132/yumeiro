@@ -172,3 +172,10 @@ test('整站：观看端报告下载很慢 → 自动降档（响应头里能看
   // 别人的设备不能改画质
   const other = await call(owner, '/api/remote/devices/00000000-0000-0000-0000-000000000000/quality', 'POST', { mode: 'high' }); assert.equal(other.status, 404);
 });
+
+test('Windows 客户端自带的被控端程序和 public/agent.mjs 保持一致（改了 agent.mjs 要运行 node scripts/sync-clients.mjs）', async () => {
+  const [a, b] = await Promise.all([readFile(path.join(root, 'public', 'agent.mjs'), 'utf8'), readFile(path.join(root, 'clients', 'windows', 'agent', 'agent.mjs'), 'utf8')]);
+  assert.equal(b, a);
+  const pkg = JSON.parse(await readFile(path.join(root, 'clients', 'windows', 'package.json'), 'utf8')); // 打包清单里要有被控端和管理它的模块，否则装好的客户端里没有
+  assert.ok(pkg.build.files.includes('remote-agent.js') && pkg.build.files.includes('agent/**'));
+});
