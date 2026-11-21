@@ -2283,20 +2283,24 @@
     restartTimer();
   }
 
-  async function renderService(body) {
-    const info = await api('/api/admin/service-update'), err = errBox();
+  async function renderService(body, refresh = false) {
+    const info = await api('/api/admin/service-update' + (refresh ? '?refresh=1' : '')), err = errBox();
+    const checkBtn = el('button', { type: 'button', class: 'secondary', textContent: '检查更新', on: { click: async () => {
+      checkBtn.disabled = true; checkBtn.textContent = '检查中…';
+      try { body.replaceChildren(); await renderService(body, true); } catch (e) { checkBtn.disabled = false; checkBtn.textContent = '检查更新'; err.textContent = e.message; }
+    } } });
     const native = el('pre', { class: 'team-code', textContent: info.nativeCommand });
     const docker = el('pre', { class: 'team-code', textContent: info.dockerCommand });
     const check = info.error
       ? el('div', { class: 'team-err', textContent: info.error })
       : info.updateAvailable
-        ? el('div', { class: 'team-err', textContent: `发现新版本 ${info.latestVersion}（当前 ${info.currentVersion}），请打开发布页查看更新说明：` }, el('a', { href: info.releaseUrl, target: '_blank', rel: 'noopener noreferrer', textContent: '查看发布页' }))
+        ? el('div', { class: 'team-err', textContent: `发现新版本 ${info.latestVersion}（当前 ${info.currentVersion}）。到发布页下载 Yumeiro-${info.latestVersion}.zip，在下面“上传压缩包更新”里上传，验证通过后点“更新到 ${info.latestVersion}”。` }, el('a', { href: info.releaseUrl, target: '_blank', rel: 'noopener noreferrer', textContent: ' 打开发布页' }))
         : el('div', { class: 'team-note', textContent: `当前已是最新版本（${info.currentVersion}）。上次检查：${fmt(info.checkedAt)}` });
     body.append(
       el('div', { class: 'team-row', style: 'display:block;border-color:var(--accent)' },
         el('b', { textContent: '当前服务版本：' + info.currentVersion }),
         el('p', { class: 'team-note', textContent: info.setupCompleted ? '首次安装已完成。管理端会自动检查 GitHub Releases，有新版本时在这里提醒。' : '首次安装尚未完成，请先打开 /setup 完成初始化。' })),
-      el('h3', { textContent: '服务器服务更新提醒' }), check,
+      el('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap' }, el('h3', { style: 'margin:0', textContent: '服务器服务更新提醒' }), checkBtn), check,
       info.latestVersion && el('p', { class: 'team-note', textContent: '最新版本：' + info.latestVersion + (info.publishedAt ? '　发布时间：' + fmt(info.publishedAt) : '') }),
       el('p', { class: 'team-note', textContent: info.message }),
       el('p', { class: 'team-note', textContent: '原生部署（systemd）更新命令：' }), native,
@@ -2314,7 +2318,7 @@
     const show = text => { msg.textContent = text; };
     const renderPending = (pending, current) => {
       pendingBox.replaceChildren();
-      if (!pending) return;
+      if (!pending) { pendingBox.append(el('button', { type: 'button', class: 'primary', disabled: true, textContent: '更新（先上传并校验压缩包）' })); return; }
       const applyBtn = el('button', { type: 'button', class: 'primary', textContent: pending.newer ? `更新到 ${pending.version}` : `仍然更新到 ${pending.version}（不高于当前版本）`, on: { click: async () => {
         if (!await ymConfirm(`确认从 ${current} 更新到 ${pending.version}？\n更新前会先备份数据，期间服务会重启几十秒；新版本没起来会自动回滚。`)) return;
         applyBtn.disabled = true; err.textContent = '';

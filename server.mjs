@@ -2461,6 +2461,7 @@ const server=http.createServer(async(req,res)=>{
     }
     if(pathname==='/api/admin/service-update'&&req.method==='GET'){
       if(!isAdmin)return adminOnly();
+      if(url.searchParams.get('refresh')==='1')updateCache.checkedAt=0; // “检查更新”按钮：跳过 10 分钟缓存，立刻问一次 GitHub
       return json(res,200,{...(await latestServiceUpdate()),setupCompleted:db.settings.setup?.status==='completed',nativeCommand:'cd <新版本解压出来的目录> && sudo bash deploy/yumeiro-native.sh update',dockerCommand:'docker compose up -d --build yumeiro',message:'发布新版本后，先备份数据，再执行对应部署方式的更新；更新会重启服务。'});
     }
     // ---- 压缩包更新：管理员上传新版发布包 + 粘贴发布页上的 SHA256，校验值对上才允许更新，不需要在服务器上敲命令 ----
