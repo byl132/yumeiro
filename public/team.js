@@ -292,7 +292,7 @@
         el('span', { textContent: `发现 Yumeiro 新版本 ${info.latestVersion}（当前 ${info.currentVersion}），建议先备份再更新。` }),
         el('span', { class: 'acts' },
           info.releaseUrl ? el('a', { href: info.releaseUrl, target: '_blank', rel: 'noopener noreferrer', textContent: '查看发布页' }) : null,
-          el('button', { type: 'button', textContent: '服务更新', on: { click: () => { location.href = '/admin/settings?tab=service'; } } }),
+          el('button', { type: 'button', textContent: '去更新 →', style: 'font-weight:650', on: { click: () => { location.href = '/admin/settings?tab=service'; } } }),
           el('button', { type: 'button', textContent: '知道了', on: { click: () => { sessionStorage.setItem('service-update-dismiss:' + info.latestVersion, '1'); updateBanner.hidden = true; } } })));
       updateBanner.hidden = false;
     } catch { updateBanner.hidden = true; }
@@ -2334,7 +2334,7 @@
         try {
           const r = await fetch('/api/admin/service-update/status', { credentials: 'same-origin' }); if (!r.ok) return; const d = await r.json(), st = d.status || {};
           if (st.state === 'ok') { clearInterval(t); show(`更新完成：现在是 ${d.currentVersion}。请按 Ctrl+F5 刷新页面。`); logBox.hidden = true; }
-          else if (st.state === 'failed') { clearInterval(t); show('更新没有成功，已自动回滚到旧版本（服务应已恢复）。日志如下：'); logBox.textContent = st.log || ''; logBox.hidden = false; upBtn.disabled = false; }
+          else if (st.state === 'failed') { clearInterval(t); show(st.interrupted ? '上次更新中途中断了。日志如下：' : '更新没有成功，已自动回滚到旧版本（服务应已恢复）。日志如下：'); logBox.textContent = st.log || ''; logBox.hidden = false; upBtn.disabled = false; }
         } catch { /* 服务重启中，继续等 */ }
       }, 4000);
     };
@@ -2344,7 +2344,7 @@
         if (!d.available) { upBtn.disabled = true; file.disabled = true; show('这台服务器不能在网页里更新（' + d.reason + '）。Docker 部署：在安装目录运行 ./install.sh enable-updater 启用一次更新器即可；原生安装：旧版本的更新助手不认识这个功能，第一次需要在新版本目录里运行 sudo bash deploy/yumeiro-native.sh update。'); return; }
         if (d.status.state === 'running') return watch(d.status.from, d.status.version);
         upBtn.disabled = false; renderPending(d.pending, d.currentVersion);
-        if (d.status.state === 'failed') { show('上一次更新失败，已回滚。日志如下：'); logBox.textContent = d.status.log || ''; logBox.hidden = false; }
+        if (d.status.state === 'failed') { show(d.status.interrupted ? '上次更新中途中断了。日志如下：' : '上一次更新失败，已回滚。日志如下：'); logBox.textContent = d.status.log || ''; logBox.hidden = false; }
         else show(d.pending ? '' : `当前版本 ${d.currentVersion}。到发布页下载新版的 Yumeiro-x.y.z.zip，填上它的 SHA256，上传即可。`);
       } catch (e) { err.textContent = e.message; }
     };

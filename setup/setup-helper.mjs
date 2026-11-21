@@ -13,7 +13,21 @@ const stagingDir=process.env.YUMEIRO_CLIENT_STAGING||'/var/lib/yumeiro-client-st
 const allowed=new Set(['install_node','install_build_tools','install_runner','install_engine','install_clients','install_cindy_desktop','configure_installation','test_postgres','service_health','apply_update','update_status']);
 const updateDir=process.env.YUMEIRO_UPLOAD_DIR||path.join(dataDir,'updates'),workRoot=process.env.YUMEIRO_UPDATE_WORK||'/var/lib/yumeiro-update',statusFile=path.join(workRoot,'status.json');
 const bad=message=>Object.assign(new Error(message),{expose:true});
-const readStatus=async()=>{try{return JSON.parse(await readFile(statusFile,'utf8'))}catch{return {state:'idle'}}};
+const pidAlive=pid=>{try{process.kill(pid,0);return true}catch(error){return error.code==='EPERM'}};
+const readStatus=async()=>{
+  let s;try{s=JSON.parse(await readFile(statusFile,'utf8'))}catch{return {state:'idle'}}
+  // “运行中”但升级进程已经不在了（例如助手/服务器在更新中途被重启，进程被一起杀掉）：不能永远卡在“正在更新”，改成“已中断”
+  if(s.state==='running'){
+    const age=Date.now()-(Number(s.startedAt)||0);
+    const dead=s.pid?!pidAlive(s.pid):age>10*60*1000;
+    if(dead||age>60*60*1000){
+      let tail='';try{tail=(await readFile(path.join(workRoot,'update.log'),'utf8')).slice(-2000)}catch{}
+      s={...s,state:'failed',interrupted:true,finishedAt:Date.now(),log:'更新进程在中途停止了（可能是服务器或更新助手在更新过程中被重启）。服务可能处于停止状态：请在服务器上执行 systemctl start yumeiro，再重新更新。\n\n'+tail};
+      await writeStatus(s).catch(()=>{});
+    }
+  }
+  return s;
+};
 const writeStatus=async value=>{await mkdir(workRoot,{recursive:true,mode:0o700});await writeFile(statusFile,JSON.stringify(value),{mode:0o600})};
 
 const registryMap={default:'',cn:'https://registry.npmmirror.com'},enginePackages={claude:'@anthropic-ai/claude-code',codex:'@openai/codex',pi:'@mariozechner/pi-coding-agent'};
@@ -43,6 +57,7 @@ async function action(body){
     await writeStatus({state:'running',from:current,version:info.version,startedAt:Date.now()});
     const {openSync}=await import('node:fs'),fd=openSync(logFile,'w',0o600);
     const child=spawn('/usr/bin/bash',[path.join(out.dir,'deploy/yumeiro-native.sh'),'update'],{cwd:out.dir,env:{PATH:'/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin',HOME:'/root',LANG:'C.UTF-8'},stdio:['ignore',fd,fd],detached:true});
+    await writeStatus({state:'running',from:current,version:info.version,startedAt:Date.now(),pid:child.pid});
     child.on('close',async code=>{
       let tail='';try{tail=(await readFile(logFile,'utf8')).slice(-3000)}catch{}
       await writeStatus({state:code===0?'ok':'failed',from:current,version:info.version,exitCode:code,finishedAt:Date.now(),log:tail}).catch(()=>{});
