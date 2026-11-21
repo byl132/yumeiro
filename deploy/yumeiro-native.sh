@@ -30,6 +30,7 @@
 #   --install-nginx     https：没有 nginx 时自动安装
 #   -y, --yes           所有询问都当作“是”（无人值守）
 #   --backup-keep N     自动备份保留份数，默认 14
+#   --no-clean          安装 / 升级成功后不要自动清理（默认会清理：旧的升级前备份只留 3 份、程序目录里不再用的旧模块、npm 缓存、已经装好的解压目录）
 #   --clients DIR       install / update 完成后顺便上传 DIR 里的客户端安装包（不写时，如果解压目录里有 Yumeiro-Clients 文件夹也会自动上传）
 set -euo pipefail
 umask 022   # root 的 umask 过严（如 077）时，新建的程序目录会变成 700，服务账号进不去（status=200/CHDIR）；密钥文件另有自己的 umask 077
@@ -53,6 +54,7 @@ command -v systemctl >/dev/null || die "需要 systemd。没有 systemd 的系�
 
 CMD="${1:-}"; shift || true
 PORT=8787; DOMAIN=""; ADMIN_EMAIL="admin@example.com"; WITH_RUNNER=1; PERSONAL=0; PG_URL=""
+NO_CLEAN=0; CLEAN_NPM_CACHE=1
 NO_ENGINES=0; MODEL_URL=""; MODEL_NAME=""; MODEL_KEY=""; NPM_REGISTRY=""; BACKUP_KEEP=14; CLIENTS_DIR=""
 WEB_SETUP=1
 ASSUME_YES=0; INSTALL_NODE=0; NODE_MIRROR=""; TLS_PORT=""; TLS_IP=""; TLS_CERT=""; TLS_KEY=""; INSTALL_NGINX=0
@@ -70,6 +72,7 @@ while [ $# -gt 0 ]; do
     --model-key) MODEL_KEY="$2"; shift 2 ;;
     --npm-registry) NPM_REGISTRY="$2"; shift 2 ;;
     --backup-keep) BACKUP_KEEP="$2"; shift 2 ;;
+    --no-clean) NO_CLEAN=1; shift ;;
     --clients) CLIENTS_DIR="$2"; shift 2 ;;
     --no-web-setup) WEB_SETUP=0; shift ;;
     --install-node) INSTALL_NODE=1; shift ;;
@@ -478,6 +481,58 @@ hint_clients() {
   say "客户端安装包：目前还没有。网页里的“下载客户端”引导会显示“管理员还没有上传”。传法：sudo $0 clients <装有 Yumeiro-Setup-*.exe / Yumeiro-*.apk 的文件夹>（详见《客户端安装包上传说明.md》）"
 }
 
+# >>> cleanup_after
+# 安装 / 升级成功之后自动清理“确定没用”的东西，每一项都会打印出来（--no-clean 可以关掉；手动执行：sudo bash deploy/yumeiro-native.sh clean）。
+# 绝不会动：数据目录、配置与密钥、工作区文件、node_modules、最近 3 份升级前备份、每日自动备份、客户端安装包。
+src_removable() {   # 解压目录能不能删：必须确实是一份 Yumeiro 程序目录，且不是正在使用的安装目录，也不包含任何数据 / 配置 / 备份目录
+  local keep
+  [ -n "$SRC" ] && [ "$SRC" != "/" ] && [ "$SRC" != "$APP_DIR" ] || return 1
+  [ -f "$SRC/deploy/yumeiro-native.sh" ] && [ -f "$SRC/server.mjs" ] && [ -f "$SRC/package.json" ] || return 1
+  for keep in "$APP_DIR" "$DATA_DIR" "$WORK_DIR" "$CONF_DIR" "$BACKUP_DIR" "${HOME:-/root}" "$PWD"; do
+    [ -n "$keep" ] || continue
+    case "$keep/" in "$SRC"/*) [ "$keep" = "$PWD" ] || return 1 ;; esac    # 当前所在目录在里面没关系（删之前会先 cd 出去）；其它目录在里面就不删
+  done
+  return 0
+}
+cleanup_after() {
+  [ "$NO_CLEAN" = 1 ] && return 0
+  local f n bytes=0 size
+  say ""; say "自动清理无用文件："
+  # 1) 升级前备份：每次升级都会生成一份完整备份，很占磁盘，只留最近 3 份
+  n=0
+  for f in $(ls -1t "$BACKUP_DIR"/pre-update-*.tar.gz 2>/dev/null | tail -n +4 || true); do
+    size=$(stat -c %s "$f" 2>/dev/null || echo 0); rm -f "$f" && { n=$((n + 1)); bytes=$((bytes + size)); }
+  done
+  [ "$n" -gt 0 ] && say "  · 旧的升级前备份：删除 $n 份（保留最近 3 份）"
+  # 2) 程序目录根目录里新版本已经不再带的旧模块（只看 *.mjs；node_modules、数据、配置不动）
+  n=0
+  for f in "$APP_DIR"/*.mjs; do
+    [ -f "$f" ] || continue
+    [ -f "$SRC/$(basename "$f")" ] && continue
+    size=$(stat -c %s "$f" 2>/dev/null || echo 0); rm -f "$f" && { n=$((n + 1)); bytes=$((bytes + size)); say "  · 旧版本留下的模块：$(basename "$f")"; }
+  done
+  # 3) npm 缓存（装依赖时留下的下载缓存，随时可以重新下载）
+  if [ "$CLEAN_NPM_CACHE" = 1 ] && command -v npm >/dev/null 2>&1; then
+    local cache; cache="$(npm config get cache 2>/dev/null || true)"
+    if [ -d "$cache" ]; then
+      size=$(du -sk "$cache" 2>/dev/null | cut -f1 || echo 0); bytes=$((bytes + size * 1024))
+      npm cache clean --force >/dev/null 2>&1 && say "  · npm 缓存：已清理（约 $((size / 1024)) MB）"
+    fi
+  fi
+  # 4) 解压出来的新版本目录（程序已经复制到 $APP_DIR，留着没用）。压缩包本身不动，请自己决定要不要删
+  if src_removable; then
+    size=$(du -sk "$SRC" 2>/dev/null | cut -f1 || echo 0); bytes=$((bytes + size * 1024))
+    local parent; parent="$(dirname "$SRC")"
+    cd /
+    rm -rf "$SRC" && say "  · 解压目录：已删除 $SRC（约 $((size / 1024)) MB）"
+    case "$parent" in /|/root|/home|/tmp|/var/tmp|"${HOME:-/root}") ;; *) rmdir "$parent" 2>/dev/null && say "  · 空文件夹：已删除 $parent" || true ;; esac
+  else
+    [ "$SRC" != "$APP_DIR" ] && say "  · 解压目录 $SRC 没有自动删除（它里面或旁边有别的重要目录），确认没用后可以自己删"
+  fi
+  ok "清理完成，共释放约 $((bytes / 1048576)) MB"
+}
+# <<< cleanup_after
+
 case "$CMD" in
 install)
   check_node
@@ -583,6 +638,7 @@ install)
   say "每日 03:30 自动备份到 $BACKUP_DIR；手动备份：$0 backup"
   say "日志：journalctl -u yumeiro -f"
   hint_clients
+  cleanup_after
   ;;
 
 update)
@@ -603,6 +659,7 @@ update)
   systemctl start yumeiro.service; [ "$WITH_RUNNER" = 1 ] && systemctl start yumeiro-runner.service
   if health 60; then ok "升级完成（版本 $(node -p "require('$APP_DIR/package.json').version")）。需要回退时备份在 $PRE"
     maybe_upload_clients; hint_clients
+    cleanup_after
   else
     warn "新版本没有起来，正在回滚…"
     systemctl stop yumeiro.service || true
@@ -627,6 +684,8 @@ clients)
   ;;
 
 backup) do_backup ;;
+
+clean) cleanup_after ;;
 
 https)
   check_node; setup_https
