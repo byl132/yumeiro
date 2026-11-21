@@ -57,7 +57,7 @@ async function latestServiceUpdate(){
     const release=await response.json();
     const latest=String(release.tag_name||'').replace(/^v/i,'');
     if(!/^\d+\.\d+\.\d+(?:[-+].*)?$/.test(latest))throw new Error('invalid release version');
-    const asset=(Array.isArray(release.assets)?release.assets:[]).find(a=>/^Yumeiro-d+.d+.d+.zip$/.test(String(a.name||''))&&a.browser_download_url);
+    const asset=(Array.isArray(release.assets)?release.assets:[]).find(a=>/^Yumeiro-\d+\.\d+\.\d+\.zip$/.test(String(a.name||''))&&a.browser_download_url);
     const result={currentVersion:appVersion,latestVersion:latest,updateAvailable:compareVersions(latest,appVersion)>0,releaseUrl:String(release.html_url||''),publishedAt:release.published_at||null,checkedAt:Date.now(),source:'GitHub Releases',notes:String(release.body||'').slice(0,1500),asset:asset?{name:String(asset.name),size:Number(asset.size)||0}:null,_assetUrl:asset?String(asset.browser_download_url):''};
     updateCache={checkedAt:Date.now(),result};return result;
   }catch(error){
