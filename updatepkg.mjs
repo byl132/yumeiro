@@ -142,3 +142,24 @@ export async function verifySignedUpdateZip(file) {
     return { ...info, signed: true, fileCount: body.length };
   });
 }
+
+// ---- 发布订阅源（releases.atom）解析 ----
+// GitHub 接口不带登录信息时每个出口 IP 每小时只有 60 次，云服务器常被限流（HTTP 403 / 429）。
+// 订阅源不限流：能拿到版本号、发布时间和说明；安装包没法从里面知道大小，按固定包名拼出下载地址，下载后仍用内置公钥验签。
+export function feedText(html) {
+  return String(html || '')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&') // 先还原 XML 转义，得到 HTML
+    .replace(/<li>/g, '- ').replace(/<[/](li|p|h[1-6]|ul|ol|pre)>/g, '\n').replace(/<[^>]+>/g, '')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&') // 再还原 HTML 转义
+    .replace(/\n{3,}/g, '\n\n').trim();
+}
+export function parseReleaseFeed(xml, base, limit = 12) {
+  return String(xml || '').split('<entry>').slice(1, limit + 1).map(block => {
+    const tag = (block.match(/releases[/]tag[/]v?([0-9]+[.][0-9]+[.][0-9]+)"/) || [])[1];
+    if (!tag) return null;
+    const when = (block.match(/<updated>([^<]+)<[/]updated>/) || [])[1] || null;
+    const content = (block.match(/<content[^>]*>([^<]*)<[/]content>/) || [])[1] || '';
+    const file = name => ({ name, size: 0, url: base + '/releases/download/v' + tag + '/' + name });
+    return { version: tag, publishedAt: when, notes: feedText(content).slice(0, 1500), releaseUrl: base + '/releases/tag/v' + tag, server: file('Yumeiro-' + tag + '.zip'), clients: file('Yumeiro-' + tag + '-with-clients.zip'), viaFeed: true };
+  }).filter(Boolean);
+}

@@ -2322,7 +2322,7 @@
   // opts: { from 当前版本, version 目标版本, variant 'server' | 'with-clients', size 字节, allowDowngrade, latest 不传版本号走“最新版”接口 }
   async function installUpdate(opts) {
     const label = opts.variant === 'with-clients' ? '含客户端安装包的完整包' : '服务端安装包';
-    if (!await ymConfirm(`${opts.allowDowngrade ? '将安装旧版本 / 重装' : '发现新版本'} ${opts.version}（当前 ${opts.from}）。\n服务器会从 GitHub 下载${label}（约 ${(opts.size / 1048576).toFixed(0)} MB），校验官方签名后更新。\n更新前自动备份，期间服务会重启一两分钟；新版本没起来会自动回滚。\n\n现在开始吗？`, { okText: '下载并安装' })) return;
+    if (!await ymConfirm(`${opts.allowDowngrade ? '将安装旧版本 / 重装' : '发现新版本'} ${opts.version}（当前 ${opts.from}）。\n服务器会从 GitHub 下载${label}（${opts.size ? '约 ' + (opts.size / 1048576).toFixed(0) + ' MB' : '大小未知'}），校验官方签名后更新。\n更新前自动备份，期间服务会重启一两分钟；新版本没起来会自动回滚。\n\n现在开始吗？`, { okText: '下载并安装' })) return;
     const info = { currentVersion: opts.from, latestVersion: opts.version };
     const mon = openUpdateMonitor(info.currentVersion, info.latestVersion), sleep = ms => new Promise(r => setTimeout(r, ms));
     try {
@@ -2358,7 +2358,7 @@
   function versionPicker(info) {
     const wrap = el('div', {}), msg = el('div', { class: 'team-note', textContent: '正在读取可选版本…' });
     wrap.append(msg);
-    const mb = a => (a.size / 1048576).toFixed(0) + ' MB';
+    const mb = a => a.size ? (a.size / 1048576).toFixed(0) + ' MB' : '大小未知';
     // older=true：降级 / 重装，需要勾选风险确认才能点安装
     const panel = (releases, data, older) => {
       const box = el('div', { style: 'display:block' });

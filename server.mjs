@@ -34,7 +34,7 @@ import QRCode from 'qrcode';
 import { aiKit, contextBundle, runsMarkdown, memoryMarkdown } from './aiexport.mjs';
 import { PROJECT_LIMITS, PROJECT_DIR, MANIFEST_NAME, mimeOf, renderMarkdownPage, signPreview, verifyPreview, previewHeaders, previewPath, manifestFor, planImport, localKit, cleanGuideMessages, parseGuideReply, guidePrompt } from './project.mjs';
 import { requestSetupHelper, requestUpdater, updaterConfigured } from './setup/setup-client.mjs';
-import { UPDATE_MAX_BYTES, verifySignedUpdateZip, compareVersions as compareReleaseVersions } from './updatepkg.mjs';
+import { parseReleaseFeed, UPDATE_MAX_BYTES, verifySignedUpdateZip, compareVersions as compareReleaseVersions } from './updatepkg.mjs';
 import { createWriteStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import { normalizeImageConfig, publicImageConfig, defaultImageConfig, imagesEndpoint, imageAuthHeaders, buildComfyWorkflow, comfyImageRefs, cleanImageRequest, buildImageRequest, parseImageResponse, sniffImage, safeResultUrl, DIALECTS as IMAGE_DIALECTS, BATCH_MODES, LIMITS as IMAGE_LIMITS } from './images.mjs';
@@ -56,10 +56,20 @@ const releaseAsset=(release,withClients)=>{
   const a=(Array.isArray(release.assets)?release.assets:[]).find(x=>re.test(String(x.name||''))&&x.browser_download_url);
   return a?{name:String(a.name),size:Number(a.size)||0,url:String(a.browser_download_url)}:null;
 };
-async function listReleases(force){
-  if(!force&&releaseCache.list.length&&Date.now()-releaseCache.checkedAt<10*60*1000)return releaseCache.list;
+const githubHeaders=()=>({Accept:'application/vnd.github+json','User-Agent':'Yumeiro-Service-Update-Checker',...(process.env.GITHUB_TOKEN?{Authorization:'Bearer '+process.env.GITHUB_TOKEN}:{})});
+const feedBase=()=>{const m=updateSource.match(/^https:[/][/]api[.]github[.]com[/]repos[/]([^/]+)[/]([^/]+)[/]releases/);return m?'https://github.com/'+m[1]+'/'+m[2]:''};
+// 接口被限流（403 / 429）或连不上时，改读不限流的发布订阅源
+async function releasesFromFeed(){
+  const base=feedBase();if(!base)throw new Error('当前发布源没有备用读取方式');
+  const response=await fetch(base+'/releases.atom',{headers:{'User-Agent':'Yumeiro-Service-Update-Checker'},signal:AbortSignal.timeout(10000),redirect:'error'});
+  if(!response.ok)throw new Error('HTTP '+response.status);
+  const list=parseReleaseFeed(await response.text(),base);
+  if(!list.length)throw new Error('发布订阅源里没有版本');
+  return list;
+}
+async function listFromApi(){
   if(!/[/]releases[/]latest[/]?$/.test(updateSource))throw new Error('当前发布源不支持列出历史版本');
-  const response=await fetch(updateSource.replace(/[/]releases[/]latest[/]?$/,'/releases?per_page=12'),{headers:{Accept:'application/vnd.github+json','User-Agent':'Yumeiro-Service-Update-Checker'},signal:AbortSignal.timeout(8000),redirect:'error'});
+  const response=await fetch(updateSource.replace(/[/]releases[/]latest[/]?$/,'/releases?per_page=12'),{headers:githubHeaders(),signal:AbortSignal.timeout(8000),redirect:'error'});
   if(!response.ok)throw new Error('HTTP '+response.status);
   const data=await response.json();
   const list=(Array.isArray(data)?data:[]).filter(r=>!r.draft&&!r.prerelease).map(r=>{
@@ -67,12 +77,18 @@ async function listReleases(force){
     if(!/^[0-9]+[.][0-9]+[.][0-9]+$/.test(version))return null;
     return {version,publishedAt:r.published_at||null,notes:String(r.body||'').slice(0,1500),releaseUrl:String(r.html_url||''),server:releaseAsset(r,false),clients:releaseAsset(r,true)};
   }).filter(Boolean);
+  return list;
+}
+async function listReleases(force){
+  if(!force&&releaseCache.list.length&&Date.now()-releaseCache.checkedAt<10*60*1000)return releaseCache.list;
+  let list;
+  try{list=await listFromApi()}catch(error){try{list=await releasesFromFeed()}catch{throw error}}
   releaseCache={checkedAt:Date.now(),list};return list;
 }
 async function latestServiceUpdate(){
   if(updateCache.result&&Date.now()-updateCache.checkedAt<10*60*1000)return updateCache.result;
   try{
-    const response=await fetch(updateSource,{headers:{Accept:'application/vnd.github+json','User-Agent':'Yumeiro-Service-Update-Checker'},signal:AbortSignal.timeout(8000),redirect:'error'});
+    const response=await fetch(updateSource,{headers:githubHeaders(),signal:AbortSignal.timeout(8000),redirect:'error'});
     if(!response.ok)throw new Error('HTTP '+response.status);
     const release=await response.json();
     const latest=String(release.tag_name||'').replace(/^v/i,'');
@@ -81,7 +97,12 @@ async function latestServiceUpdate(){
     const result={currentVersion:appVersion,latestVersion:latest,updateAvailable:compareVersions(latest,appVersion)>0,releaseUrl:String(release.html_url||''),publishedAt:release.published_at||null,checkedAt:Date.now(),source:'GitHub Releases',notes:String(release.body||'').slice(0,1500),asset:asset?{name:String(asset.name),size:Number(asset.size)||0}:null,_assetUrl:asset?String(asset.browser_download_url):''};
     updateCache={checkedAt:Date.now(),result};return result;
   }catch(error){
-    const result={currentVersion:appVersion,latestVersion:null,updateAvailable:false,releaseUrl:'',publishedAt:null,checkedAt:Date.now(),source:'GitHub Releases',error:'暂时无法检查更新：'+(error.name==='TimeoutError'?'连接超时（服务器可能访问不了 GitHub）':/^HTTP 404/.test(error.message)?'GitHub 上还没有发布版本（HTTP 404）':/^HTTP /.test(error.message)?'发布源返回 '+error.message:'无法连接发布源（网络不通或被拦截）')};
+    try{
+      const [top]=await releasesFromFeed();
+      const result={currentVersion:appVersion,latestVersion:top.version,updateAvailable:compareVersions(top.version,appVersion)>0,releaseUrl:top.releaseUrl,publishedAt:top.publishedAt,checkedAt:Date.now(),source:'GitHub Releases（订阅源）',notes:top.notes,asset:{name:top.server.name,size:0},_assetUrl:top.server.url};
+      updateCache={checkedAt:Date.now(),result};return result;
+    }catch{ /* 备用方式也不行，下面报原来的错误 */ }
+    const result={currentVersion:appVersion,latestVersion:null,updateAvailable:false,releaseUrl:'',publishedAt:null,checkedAt:Date.now(),source:'GitHub Releases',error:'暂时无法检查更新：'+(error.name==='TimeoutError'?'连接超时（服务器可能访问不了 GitHub）':/^HTTP 404/.test(error.message)?'GitHub 上还没有发布版本（HTTP 404）':/^HTTP (403|429)/.test(error.message)?'GitHub 接口被限流（'+error.message+'：同一出口 IP 每小时只能请求 60 次），备用的订阅源也读取失败，请稍后再试或手动上传安装包':/^HTTP /.test(error.message)?'发布源返回 '+error.message:'无法连接发布源（网络不通或被拦截）')};
     updateCache={checkedAt:Date.now(),result};return result;
   }
 }
