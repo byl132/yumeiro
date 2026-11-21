@@ -50,7 +50,7 @@ chmod +x install.sh && ./install.sh     # 向导式配置，结束后按提示 d
 
 以 [Apache License 2.0](./LICENSE) 开源，使用、修改、分发（包括商用）请保留署名和许可证。第三方声明见 [`NOTICE`](./NOTICE)，关于 Cindy 在线服务条款和美术素材的提醒见 [`商业化声明.md`](./商业化声明.md)。
 
-## 一、安装（华为云 / 任意 Linux + Docker）
+## 一、安装（云服务器 / 任意 Linux + Docker）
 
 前置：Docker Engine 与 Compose 插件。把整个目录上传到服务器后：
 
