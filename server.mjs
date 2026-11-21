@@ -2531,7 +2531,8 @@ const server=http.createServer(async(req,res)=>{
     if(pathname==='/api/admin/service-update/releases'&&req.method==='GET'){
       if(!isAdmin)return adminOnly();
       try{
-        const list=await listReleases(url.searchParams.get('refresh')==='1');
+        const known=(await latestServiceUpdate()).latestVersion; // 已知的最新版本不在缓存列表里（刚发布的新版本）就强制重新读
+        const list=await listReleases(url.searchParams.get('refresh')==='1'||Boolean(known&&!releaseCache.list.some(item=>item.version===known)));
         const strip=a=>a?{name:a.name,size:a.size}:null;
         return json(res,200,{currentVersion:appVersion,releases:list.map(item=>({version:item.version,publishedAt:item.publishedAt,notes:item.notes,releaseUrl:item.releaseUrl,newer:compareVersions(item.version,appVersion)>0,current:item.version===appVersion,server:strip(item.server),clients:strip(item.clients)}))});
       }catch(error){return json(res,502,{error:'无法读取发布列表：'+(error.name==='TimeoutError'?'连接超时（服务器可能访问不了 GitHub）':error.message)})}

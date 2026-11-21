@@ -2354,42 +2354,48 @@
     } catch (e) { mon.fail(e.message); }
   }
 
-  // 选择版本和包类型再一键安装：版本来自 GitHub 最近的正式发布；旧版本需勾选“允许降级/重装”；每个版本标明有没有“服务端包 / 含客户端的包”
+  // 选版本安装：主区只列比当前更新的版本；旧版本 / 重装当前版本单独折叠成另一块（需要明确勾选风险）。每个版本标明有没有“服务端包 / 含客户端的包”。
   function versionPicker(info) {
-    const box = el('div', { class: 'team-row', style: 'display:block;margin:8px 0' }), msg = el('div', { class: 'team-note', textContent: '正在读取可选版本…' });
-    box.append(el('b', { textContent: '选择版本并安装' }), msg);
-    api('/api/admin/service-update/releases').then(data => {
-      const list = data.releases || [];
-      if (!list.length) { msg.textContent = 'GitHub 上还没有可选的发布版本。'; return; }
-      const mb = a => (a.size / 1048576).toFixed(0) + ' MB';
-      const ver = el('select', {}, list.map((r, i) => el('option', { value: r.version, textContent: r.version + (i === 0 ? '（最新）' : '') + (r.current ? '（当前）' : r.newer ? '' : '（旧版本）') + `　［服务端${r.server ? '✓' : '✗'} · 含客户端${r.clients ? '✓' : '✗'}］` })));
-      const kind = el('select', {});
-      const downgrade = el('input', { type: 'checkbox' }), downLabel = el('label', { style: 'font-size:13px;display:none' }, downgrade, ' 允许降级 / 重装同版本');
-      const note = el('div', { class: 'team-note' }), go = el('button', { type: 'button', class: 'primary', textContent: '下载并安装' });
-      const cur = () => list.find(r => r.version === ver.value);
+    const wrap = el('div', {}), msg = el('div', { class: 'team-note', textContent: '正在读取可选版本…' });
+    wrap.append(msg);
+    const mb = a => (a.size / 1048576).toFixed(0) + ' MB';
+    // older=true：降级 / 重装，需要勾选风险确认才能点安装
+    const panel = (releases, data, older) => {
+      const box = el('div', { style: 'display:block' });
+      if (!releases.length) { box.append(el('div', { class: 'team-note', textContent: older ? '没有更旧的版本可选。' : `没有比当前（${data.currentVersion}）更新的版本。` })); return box; }
+      const ver = el('select', {}, releases.map((r, i) => el('option', { value: r.version, textContent: r.version + (!older && i === 0 ? '（最新）' : '') + (r.current ? '（当前版本，重装）' : '') + `　［服务端${r.server ? '✓' : '✗'} · 含客户端${r.clients ? '✓' : '✗'}］` })));
+      const kind = el('select', {}), info2 = el('div', { class: 'team-note' }), notes = el('details', { style: 'margin-top:6px' });
+      const ack = el('input', { type: 'checkbox' }), ackLabel = el('label', { style: 'font-size:13px;display:block;margin-top:8px' }, ack, ' 我知道这会换成旧版本（或重装当前版本）。更新前会自动备份；如果新版本改过数据结构，旧版本可能读不了这些数据，起不来会自动回滚。');
+      const go = el('button', { type: 'button', class: older ? 'secondary' : 'primary', textContent: older ? '下载并安装这个旧版本' : '下载并安装' });
+      const cur = () => releases.find(r => r.version === ver.value);
       const refresh = () => {
         const r = cur(), keep = kind.value;
         kind.replaceChildren(
           el('option', { value: 'server', textContent: r.server ? `仅服务端（${mb(r.server)}，不含客户端安装包）` : '仅服务端（这个版本没有）', disabled: !r.server }),
           el('option', { value: 'with-clients', textContent: r.clients ? `含客户端安装包（${mb(r.clients)}，Windows / 安卓）` : '含客户端安装包（这个版本没有）', disabled: !r.clients }));
-        kind.value = (keep === 'with-clients' && r.clients) || !r.server ? (r.clients ? 'with-clients' : 'server') : 'server';
-        const needDown = !r.newer; downLabel.style.display = needDown ? '' : 'none'; if (!needDown) downgrade.checked = false;
-        note.replaceChildren(
-          el('div', { textContent: `这个版本的安装包：服务端 ${r.server ? '✓ ' + mb(r.server) : '✗ 没有'}　含客户端 ${r.clients ? '✓ ' + mb(r.clients) : '✗ 没有'}${r.server || r.clients ? '' : '（请到发布页手动下载）'}` }),
-          r.notes ? el('div', { textContent: '这个版本改了什么：' + r.notes.replace(/\n+/g, ' ').slice(0, 200) }) : null);
-        go.disabled = !(r.server || r.clients);
+        kind.value = keep === 'with-clients' && r.clients ? 'with-clients' : r.server ? 'server' : r.clients ? 'with-clients' : 'server';
+        info2.textContent = `这个版本的安装包：服务端 ${r.server ? '✓ ' + mb(r.server) : '✗ 没有'}　含客户端 ${r.clients ? '✓ ' + mb(r.clients) : '✗ 没有'}${r.server || r.clients ? '' : '（请到发布页手动下载后上传）'}`;
+        notes.replaceChildren(el('summary', { textContent: '这个版本改了什么' }), el('pre', { class: 'team-code', style: 'white-space:pre-wrap;max-height:200px;overflow:auto', textContent: r.notes || '（发布页没有写说明）' }));
+        go.disabled = !(r.server || r.clients) || (older && !ack.checked);
       };
-      ver.addEventListener('change', refresh); refresh();
+      ver.addEventListener('change', refresh); kind.addEventListener('change', refresh); ack.addEventListener('change', refresh); refresh();
       go.addEventListener('click', () => {
         const r = cur(), pick = kind.value === 'with-clients' ? r.clients : r.server;
         if (!pick) { ymAlert('这个版本没有所选类型的安装包。'); return; }
-        if (!r.newer && !downgrade.checked) { ymAlert(`所选版本 ${r.version} 不高于当前版本 ${data.currentVersion}。确需降级或重装，请勾选“允许降级 / 重装同版本”。`); return; }
-        installUpdate({ from: data.currentVersion, version: r.version, variant: kind.value, size: pick.size, allowDowngrade: !r.newer });
+        installUpdate({ from: data.currentVersion, version: r.version, variant: kind.value, size: pick.size, allowDowngrade: older });
       });
+      box.append(el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center' }, el('label', { style: 'font-size:13px' }, '版本 ', ver), el('label', { style: 'font-size:13px' }, '包类型 ', kind)), info2, ...(older ? [ackLabel] : []), el('div', { style: 'margin-top:8px' }, go), notes);
+      return box;
+    };
+    api('/api/admin/service-update/releases').then(data => {
+      const list = data.releases || [];
+      if (!list.length) { msg.textContent = 'GitHub 上还没有可选的发布版本。'; return; }
       msg.remove();
-      box.append(el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px' }, el('label', { style: 'font-size:13px' }, '版本 ', ver), el('label', { style: 'font-size:13px' }, '包类型 ', kind), go), downLabel, note);
+      wrap.append(
+        el('div', { class: 'team-row', style: 'display:block;margin:8px 0' }, el('b', { textContent: '选择新版本并安装' }), panel(list.filter(r => r.newer), data, false)),
+        el('details', { class: 'team-row', style: 'display:block;margin:8px 0' }, el('summary', { style: 'cursor:pointer;font-weight:650', textContent: '安装旧版本 / 重装当前版本（降级，一般不需要）' }), panel(list.filter(r => !r.newer), data, true)));
     }).catch(e => { msg.textContent = e.message + '（也可以在下面手动上传安装包）'; });
-    return box;
+    return wrap;
   }
 
   async function renderService(body, refresh = false) {
@@ -2406,12 +2412,11 @@
         ? el('div', { class: 'team-err', textContent: `发现新版本 ${info.latestVersion}（当前 ${info.currentVersion}）。可以在下面“选择版本并安装”里一键安装（可选版本和是否含客户端安装包），也可以到发布页下载 Yumeiro-${info.latestVersion}.zip 后在“上传压缩包更新”里上传。` }, el('a', { href: info.releaseUrl, target: '_blank', rel: 'noopener noreferrer', textContent: ' 打开发布页' }))
         : el('div', { class: 'team-note', textContent: `当前已是最新版本（${info.currentVersion}）。上次检查：${fmt(info.checkedAt)}` });
     const oneClick = versionPicker(info);
-    const notes = info.updateAvailable && info.notes ? el('details', {}, el('summary', { textContent: '这个版本改了什么' }), el('pre', { class: 'team-code', style: 'white-space:pre-wrap;max-height:220px;overflow:auto', textContent: info.notes })) : null;
     body.append(
       el('div', { class: 'team-row', style: 'display:block;border-color:var(--accent)' },
         el('b', { textContent: '当前服务版本：' + info.currentVersion }),
         el('p', { class: 'team-note', textContent: info.setupCompleted ? '首次安装已完成。管理端会自动检查 GitHub Releases，有新版本时在这里提醒。' : '首次安装尚未完成，请先打开 /setup 完成初始化。' })),
-      el('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap' }, el('h3', { style: 'margin:0', textContent: '服务器服务更新提醒' }), checkBtn), check, oneClick, notes,
+      el('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap' }, el('h3', { style: 'margin:0', textContent: '服务器服务更新提醒' }), checkBtn), check, oneClick,
       info.latestVersion && el('p', { class: 'team-note', textContent: '最新版本：' + info.latestVersion + (info.publishedAt ? '　发布时间：' + fmt(info.publishedAt) : '') }),
       el('p', { class: 'team-note', textContent: info.message }),
       el('p', { class: 'team-note', textContent: '原生部署（systemd）更新命令：' }), native,
