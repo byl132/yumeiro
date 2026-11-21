@@ -323,7 +323,8 @@
     return response;
   };
   const bootDone = () => document.documentElement.classList.remove('settings-boot');
-  setTimeout(bootDone, 5000);
+  // 只有设置页要靠这个兜底；首页由登录检查自己决定显示登录还是对话，不能到点就把登录页露出来（会先闪登录页再跳回对话）
+  if (pageMode) setTimeout(bootDone, 5000);
   let ticking = false;
   const tick = async () => { if (ticking) return; ticking = true; try { await tickOnce(); } finally { ticking = false; } };
   const tickOnce = async () => {
