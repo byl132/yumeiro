@@ -49,6 +49,26 @@ const updateSource=process.env.SERVICE_UPDATE_URL||'https://api.github.com/repos
 let updateCache={checkedAt:0,result:null},updateUploading=false,updateDownload={state:'idle'};
 const updateHostOk=host=>host==='github.com'||host.endsWith('.github.com')||host.endsWith('.githubusercontent.com')||host===(()=>{try{return new URL(updateSource).host}catch{return ''}})();
 function compareVersions(a,b){const pa=String(a||'').replace(/^v/i,'').split('.').map(Number),pb=String(b||'').replace(/^v/i,'').split('.').map(Number);for(let i=0;i<3;i++){const d=(pa[i]||0)-(pb[i]||0);if(d)return d}return 0}
+// 发布列表（供“选择版本 / 选择包类型”）：只收正式发布；包名用字符类写，避免转义丢失
+let releaseCache={checkedAt:0,list:[]};
+const releaseAsset=(release,withClients)=>{
+  const re=withClients?/^Yumeiro-[0-9]+[.][0-9]+[.][0-9]+-with-clients[.]zip$/:/^Yumeiro-[0-9]+[.][0-9]+[.][0-9]+[.]zip$/;
+  const a=(Array.isArray(release.assets)?release.assets:[]).find(x=>re.test(String(x.name||''))&&x.browser_download_url);
+  return a?{name:String(a.name),size:Number(a.size)||0,url:String(a.browser_download_url)}:null;
+};
+async function listReleases(force){
+  if(!force&&releaseCache.list.length&&Date.now()-releaseCache.checkedAt<10*60*1000)return releaseCache.list;
+  if(!/[/]releases[/]latest[/]?$/.test(updateSource))throw new Error('当前发布源不支持列出历史版本');
+  const response=await fetch(updateSource.replace(/[/]releases[/]latest[/]?$/,'/releases?per_page=12'),{headers:{Accept:'application/vnd.github+json','User-Agent':'Yumeiro-Service-Update-Checker'},signal:AbortSignal.timeout(8000),redirect:'error'});
+  if(!response.ok)throw new Error('HTTP '+response.status);
+  const data=await response.json();
+  const list=(Array.isArray(data)?data:[]).filter(r=>!r.draft&&!r.prerelease).map(r=>{
+    const version=String(r.tag_name||'').replace(/^v/i,'');
+    if(!/^[0-9]+[.][0-9]+[.][0-9]+$/.test(version))return null;
+    return {version,publishedAt:r.published_at||null,notes:String(r.body||'').slice(0,1500),releaseUrl:String(r.html_url||''),server:releaseAsset(r,false),clients:releaseAsset(r,true)};
+  }).filter(Boolean);
+  releaseCache={checkedAt:Date.now(),list};return list;
+}
 async function latestServiceUpdate(){
   if(updateCache.result&&Date.now()-updateCache.checkedAt<10*60*1000)return updateCache.result;
   try{
@@ -2507,6 +2527,15 @@ const server=http.createServer(async(req,res)=>{
       }catch(error){await rm(target,{force:true}).catch(()=>{});return json(res,error.status||500,{error:error.status?error.message:'上传失败：'+error.message})}
       finally{updateUploading=false}
     }
+    // 可选择的版本列表：最近 12 个正式发布，每个标明有没有服务端包 / 含客户端的包（下载地址只留在服务器端，不发给浏览器）
+    if(pathname==='/api/admin/service-update/releases'&&req.method==='GET'){
+      if(!isAdmin)return adminOnly();
+      try{
+        const list=await listReleases(url.searchParams.get('refresh')==='1');
+        const strip=a=>a?{name:a.name,size:a.size}:null;
+        return json(res,200,{currentVersion:appVersion,releases:list.map(item=>({version:item.version,publishedAt:item.publishedAt,notes:item.notes,releaseUrl:item.releaseUrl,newer:compareVersions(item.version,appVersion)>0,current:item.version===appVersion,server:strip(item.server),clients:strip(item.clients)}))});
+      }catch(error){return json(res,502,{error:'无法读取发布列表：'+(error.name==='TimeoutError'?'连接超时（服务器可能访问不了 GitHub）':error.message)})}
+    }
     // 一键更新：管理员点一下，服务器自己从 GitHub 发布页下载服务端安装包 → 内置公钥验签 → 存成待安装包；之后和上传的包走同一个“更新”接口（备份、替换、起不来自动回滚）
     if(pathname==='/api/admin/service-update/download-latest'&&req.method==='POST'){
       if(!isAdmin)return adminOnly();
@@ -2515,10 +2544,23 @@ const server=http.createServer(async(req,res)=>{
       if(helper.status.state==='running')return json(res,409,{error:'已有更新正在进行'});
       if(updateUploading||['downloading','verifying'].includes(updateDownload.state))return json(res,409,{error:'正在下载或上传另一个安装包'});
       const body=await readBody(req);if(body.confirm!==true)return json(res,400,{error:'需要确认：更新会备份数据并重启服务'});
-      updateCache.checkedAt=0;const latest=await latestServiceUpdate();
-      if(latest.error)return json(res,502,{error:latest.error});
-      if(!latest.updateAvailable)return json(res,400,{error:'当前已经是最新版本'});
-      if(!latest._assetUrl)return json(res,400,{error:'发布页里没有找到服务端安装包（Yumeiro-x.y.z.zip），请到发布页手动下载后上传'});
+      // 管理员可以选版本（含旧版本，需勾选“允许降级/重装”）和包类型（仅服务端 / 含客户端安装包）；不传版本就是“最新版的服务端包”
+      const variant=body.variant==='with-clients'?'with-clients':'server';
+      let latest;
+      if(body.version){
+        let releases;try{releases=await listReleases(true)}catch(error){return json(res,502,{error:'无法读取发布列表：'+error.message})}
+        const wanted=releases.find(item=>item.version===String(body.version));
+        if(!wanted)return json(res,400,{error:'GitHub 上没有版本 '+String(body.version).slice(0,20)});
+        const picked=variant==='with-clients'?wanted.clients:wanted.server;
+        if(!picked)return json(res,400,{error:'这个版本的发布页里没有'+(variant==='with-clients'?'含客户端的安装包（Yumeiro-x.y.z-with-clients.zip）':'服务端安装包（Yumeiro-x.y.z.zip）')+'，请换一种或手动下载后上传'});
+        if(compareVersions(wanted.version,appVersion)<=0&&body.allowDowngrade!==true)return json(res,400,{error:'所选版本不高于当前版本（'+appVersion+'）；确需降级或重装请勾选“允许降级/重装”'});
+        latest={latestVersion:wanted.version,asset:{name:picked.name,size:picked.size},_assetUrl:picked.url};
+      }else{
+        updateCache.checkedAt=0;latest=await latestServiceUpdate();
+        if(latest.error)return json(res,502,{error:latest.error});
+        if(!latest.updateAvailable)return json(res,400,{error:'当前已经是最新版本'});
+        if(!latest._assetUrl)return json(res,400,{error:'发布页里没有找到服务端安装包（Yumeiro-x.y.z.zip），请到发布页手动下载后上传'});
+      }
       if(latest.asset.size>UPDATE_MAX_BYTES)return json(res,413,{error:'安装包超过 '+Math.round(UPDATE_MAX_BYTES/1048576)+' MB 上限'});
       updateUploading=true;updateDownload={state:'downloading',version:latest.latestVersion,received:0,total:latest.asset.size,startedAt:Date.now()};
       const id=randomUUID(),file='incoming-'+id+'.zip',target=path.join(updatesDir,file),hash=createHash('sha256'),version=latest.latestVersion,startedAt=updateDownload.startedAt;

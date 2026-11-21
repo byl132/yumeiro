@@ -2317,11 +2317,17 @@
   }
   async function installLatestUpdate(info) {
     if (!info?.asset) { ymAlert('发布页里没有找到服务端安装包（Yumeiro-x.y.z.zip），请到发布页手动下载后在“服务更新”页上传。'); return; }
-    if (!await ymConfirm(`发现新版本 ${info.latestVersion}（当前 ${info.currentVersion}）。\n服务器会从 GitHub 下载安装包（约 ${(info.asset.size / 1048576).toFixed(0)} MB），校验官方签名后更新。\n更新前自动备份，期间服务会重启一两分钟；新版本没起来会自动回滚。\n\n现在开始吗？`, { okText: '下载并安装' })) return;
+    return installUpdate({ from: info.currentVersion, version: info.latestVersion, variant: 'server', size: info.asset.size, latest: true });
+  }
+  // opts: { from 当前版本, version 目标版本, variant 'server' | 'with-clients', size 字节, allowDowngrade, latest 不传版本号走“最新版”接口 }
+  async function installUpdate(opts) {
+    const label = opts.variant === 'with-clients' ? '含客户端安装包的完整包' : '服务端安装包';
+    if (!await ymConfirm(`${opts.allowDowngrade ? '将安装旧版本 / 重装' : '发现新版本'} ${opts.version}（当前 ${opts.from}）。\n服务器会从 GitHub 下载${label}（约 ${(opts.size / 1048576).toFixed(0)} MB），校验官方签名后更新。\n更新前自动备份，期间服务会重启一两分钟；新版本没起来会自动回滚。\n\n现在开始吗？`, { okText: '下载并安装' })) return;
+    const info = { currentVersion: opts.from, latestVersion: opts.version };
     const mon = openUpdateMonitor(info.currentVersion, info.latestVersion), sleep = ms => new Promise(r => setTimeout(r, ms));
     try {
       mon.step('download');
-      await api('/api/admin/service-update/download-latest', { method: 'POST', body: JSON.stringify({ confirm: true }) });
+      await api('/api/admin/service-update/download-latest', { method: 'POST', body: JSON.stringify({ confirm: true, variant: opts.variant, allowDowngrade: opts.allowDowngrade === true, ...(opts.latest ? {} : { version: opts.version }) }) });
       let d;
       for (;;) {
         await sleep(700); d = await api('/api/admin/service-update/status'); const dl = d.download || {};
@@ -2332,7 +2338,7 @@
       }
       if (!d.pending) throw new Error('安装包没有保存成功，请重试');
       mon.step('install'); mon.text('正在备份数据并替换程序…');
-      await api('/api/admin/service-update/apply', { method: 'POST', body: JSON.stringify({ confirm: true, sha256: d.pending.sha256, allowDowngrade: false }) });
+      await api('/api/admin/service-update/apply', { method: 'POST', body: JSON.stringify({ confirm: true, sha256: d.pending.sha256, allowDowngrade: opts.allowDowngrade === true }) });
       const t0 = Date.now();
       for (;;) {
         await sleep(3000);
@@ -2348,6 +2354,44 @@
     } catch (e) { mon.fail(e.message); }
   }
 
+  // 选择版本和包类型再一键安装：版本来自 GitHub 最近的正式发布；旧版本需勾选“允许降级/重装”；每个版本标明有没有“服务端包 / 含客户端的包”
+  function versionPicker(info) {
+    const box = el('div', { class: 'team-row', style: 'display:block;margin:8px 0' }), msg = el('div', { class: 'team-note', textContent: '正在读取可选版本…' });
+    box.append(el('b', { textContent: '选择版本并安装' }), msg);
+    api('/api/admin/service-update/releases').then(data => {
+      const list = data.releases || [];
+      if (!list.length) { msg.textContent = 'GitHub 上还没有可选的发布版本。'; return; }
+      const mb = a => (a.size / 1048576).toFixed(0) + ' MB';
+      const ver = el('select', {}, list.map((r, i) => el('option', { value: r.version, textContent: r.version + (i === 0 ? '（最新）' : '') + (r.current ? '（当前）' : r.newer ? '' : '（旧版本）') + `　［服务端${r.server ? '✓' : '✗'} · 含客户端${r.clients ? '✓' : '✗'}］` })));
+      const kind = el('select', {});
+      const downgrade = el('input', { type: 'checkbox' }), downLabel = el('label', { style: 'font-size:13px;display:none' }, downgrade, ' 允许降级 / 重装同版本');
+      const note = el('div', { class: 'team-note' }), go = el('button', { type: 'button', class: 'primary', textContent: '下载并安装' });
+      const cur = () => list.find(r => r.version === ver.value);
+      const refresh = () => {
+        const r = cur(), keep = kind.value;
+        kind.replaceChildren(
+          el('option', { value: 'server', textContent: r.server ? `仅服务端（${mb(r.server)}，不含客户端安装包）` : '仅服务端（这个版本没有）', disabled: !r.server }),
+          el('option', { value: 'with-clients', textContent: r.clients ? `含客户端安装包（${mb(r.clients)}，Windows / 安卓）` : '含客户端安装包（这个版本没有）', disabled: !r.clients }));
+        kind.value = (keep === 'with-clients' && r.clients) || !r.server ? (r.clients ? 'with-clients' : 'server') : 'server';
+        const needDown = !r.newer; downLabel.style.display = needDown ? '' : 'none'; if (!needDown) downgrade.checked = false;
+        note.replaceChildren(
+          el('div', { textContent: `这个版本的安装包：服务端 ${r.server ? '✓ ' + mb(r.server) : '✗ 没有'}　含客户端 ${r.clients ? '✓ ' + mb(r.clients) : '✗ 没有'}${r.server || r.clients ? '' : '（请到发布页手动下载）'}` }),
+          r.notes ? el('div', { textContent: '这个版本改了什么：' + r.notes.replace(/\n+/g, ' ').slice(0, 200) }) : null);
+        go.disabled = !(r.server || r.clients);
+      };
+      ver.addEventListener('change', refresh); refresh();
+      go.addEventListener('click', () => {
+        const r = cur(), pick = kind.value === 'with-clients' ? r.clients : r.server;
+        if (!pick) { ymAlert('这个版本没有所选类型的安装包。'); return; }
+        if (!r.newer && !downgrade.checked) { ymAlert(`所选版本 ${r.version} 不高于当前版本 ${data.currentVersion}。确需降级或重装，请勾选“允许降级 / 重装同版本”。`); return; }
+        installUpdate({ from: data.currentVersion, version: r.version, variant: kind.value, size: pick.size, allowDowngrade: !r.newer });
+      });
+      msg.remove();
+      box.append(el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px' }, el('label', { style: 'font-size:13px' }, '版本 ', ver), el('label', { style: 'font-size:13px' }, '包类型 ', kind), go), downLabel, note);
+    }).catch(e => { msg.textContent = e.message + '（也可以在下面手动上传安装包）'; });
+    return box;
+  }
+
   async function renderService(body, refresh = false) {
     const info = await api('/api/admin/service-update' + (refresh ? '?refresh=1' : '')), err = errBox();
     const checkBtn = el('button', { type: 'button', class: 'secondary', textContent: '检查更新', on: { click: async () => {
@@ -2359,9 +2403,9 @@
     const check = info.error
       ? el('div', { class: 'team-err', textContent: info.error })
       : info.updateAvailable
-        ? el('div', { class: 'team-err', textContent: `发现新版本 ${info.latestVersion}（当前 ${info.currentVersion}）。到发布页下载 Yumeiro-${info.latestVersion}.zip，在下面“上传压缩包更新”里上传，验证通过后点“更新到 ${info.latestVersion}”。` }, el('a', { href: info.releaseUrl, target: '_blank', rel: 'noopener noreferrer', textContent: ' 打开发布页' }))
+        ? el('div', { class: 'team-err', textContent: `发现新版本 ${info.latestVersion}（当前 ${info.currentVersion}）。可以在下面“选择版本并安装”里一键安装（可选版本和是否含客户端安装包），也可以到发布页下载 Yumeiro-${info.latestVersion}.zip 后在“上传压缩包更新”里上传。` }, el('a', { href: info.releaseUrl, target: '_blank', rel: 'noopener noreferrer', textContent: ' 打开发布页' }))
         : el('div', { class: 'team-note', textContent: `当前已是最新版本（${info.currentVersion}）。上次检查：${fmt(info.checkedAt)}` });
-    const oneClick = info.updateAvailable && info.asset ? el('div', { style: 'margin:8px 0' }, el('button', { type: 'button', class: 'primary', textContent: `一键下载并安装 ${info.latestVersion}`, on: { click: () => installLatestUpdate(info) } }), el('span', { class: 'team-note', style: 'margin-left:8px', textContent: `从 GitHub 下载约 ${(info.asset.size / 1048576).toFixed(0)} MB，校验官方签名后自动备份并更新` })) : null;
+    const oneClick = versionPicker(info);
     const notes = info.updateAvailable && info.notes ? el('details', {}, el('summary', { textContent: '这个版本改了什么' }), el('pre', { class: 'team-code', style: 'white-space:pre-wrap;max-height:220px;overflow:auto', textContent: info.notes })) : null;
     body.append(
       el('div', { class: 'team-row', style: 'display:block;border-color:var(--accent)' },
